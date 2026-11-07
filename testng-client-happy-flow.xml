@@ -1,0 +1,13 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- CLIENT ONBOARDING - E2E HAPPY FLOW. One test class = one report folder named after the class.
+     Creates ONE client (yopmail) and takes it from registration to ACTIVE, then checks the client profile (portal + admin).
+     Run:  mvn clean test -Dsuite=testng-client-happy-flow.xml
+     Re-check an existing client's profile without creating one:  add -Dhappy.client.data=reports/<folder>/test-data.json
+     Classes run one after the other (parallel="none"): reports and screenshots of each class stay separate. -->
+<suite name="KOMP IND Testing - Client onboarding" verbose="1" parallel="none">
+    <test name="Client onboarding - E2E happy flow">
+        <classes>
+            <class name="tests.ClientOnboardingE2EHappyFlow"/>
+        </classes>
+    </test>
+</suite>

@@ -1,0 +1,15 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- CLIENT ONBOARDING - E2E NEGATIVE AND EDGE CASES. One test class = one report folder named after the class.
+     Every negative / edge case of the client module on ONE client (2-client rule: 1 here + 1 in the happy flow).
+     Run:  mvn clean test -Dsuite=testng-client-edge-cases.xml                    (registers 1 yopmail client, takes about 1 hour)
+     One case:  add -Dcases=O-10   (several: -Dcases=O-10,C-03; set-up steps run on demand)
+     Existing client instead of registering:  add -Dedge.client.email=<yopmail address>   (password: env KOMP_EDGE_CLIENT_PASSWORD)
+     An existing client that never logged in (first-login cases run too):  add -Dedge.client.fresh=true -Dedge.client.name="<legal name>"
+     Classes run one after the other (parallel="none"): reports and screenshots of each class stay separate. -->
+<suite name="KOMP IND Testing - Client onboarding" verbose="1" parallel="none">
+    <test name="Client onboarding - E2E negative and edge cases">
+        <classes>
+            <class name="tests.ClientOnboardingEdgeCases"/>
+        </classes>
+    </test>
+</suite>

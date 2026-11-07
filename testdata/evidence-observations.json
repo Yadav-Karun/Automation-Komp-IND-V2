@@ -1,0 +1,30 @@
+[
+  {
+    "id": "X-90",
+    "group": "C5 API health (observed in earlier executions)",
+    "title": "POST /msa-contract/api/status/ returns 404 while the MSA is being generated",
+    "input": "Happy-path journey, phase 11 'Generate MSA': after 'Confirm & Continue' on the Review page the client portal calls POST https://sandbox-backend.kompglobal.com/msa-contract/api/status/ while the 'Sign MSA' step waits for the document",
+    "expected": "Every API call of the journey returns 2xx (or a documented 'not ready yet' response such as 202/204)",
+    "actual": "POST https://sandbox-backend.kompglobal.com/msa-contract/api/status/ -> 404 at phase 11 in 3 of 3 happy-path executions (20261107_150729_4ce9, 20261107_151003_ee23, 20261107_151151_eb23); the next call GET .../msa-contract/api/view-msa-contract/ records no response. The journey still completes and the same endpoint returns 200 for an existing contract (test B-41).",
+    "defect": "Status endpoint answers 404 during MSA generation; the UI hides it, but it floods the browser console / monitoring with 4xx and may be a real 'contract not found' race",
+    "run": "20261107_151151_eb23",
+    "apiEvidence": "20261107_151151_eb23/api-evidence/network-summary.json",
+    "screenshot": "20261107_151151_eb23/screenshots/11_msa_generation_PASS.png",
+    "status": "FAIL",
+    "repeat": "Observed in 3 of 3 happy-path executions; not re-run for this report because the journey creates a new client (outside the 'no new clients' rule). Re-run: mvn clean test (happy path) and read network-summary.json phase 11_msa_generation."
+  },
+  {
+    "id": "X-91",
+    "group": "C5 API health (observed in earlier executions)",
+    "title": "GET /notifications/push_api/user-notification/ returned 500 once on the client portal",
+    "input": "Happy-path journey, phase 17 'Client confirms onboarding complete': the client signs in after activation and the portal home calls GET https://sandbox-backend.kompglobal.com/notifications/push_api/user-notification/",
+    "expected": "200 for the notifications call on every portal visit",
+    "actual": "GET https://sandbox-backend.kompglobal.com/notifications/push_api/user-notification/ -> 500 once (execution 20261107_151151_eb23, phase 17). The same call returned 200 in later visits (tests B-41, X-80 and X-81), so it is intermittent.",
+    "defect": "Intermittent HTTP 500 from the notifications endpoint on the client portal",
+    "run": "20261107_151151_eb23",
+    "apiEvidence": "20261107_151151_eb23/api-evidence/network-summary.json",
+    "screenshot": "20261107_151151_eb23/screenshots/17_client_onboarding_complete_PASS.png",
+    "status": "FAIL",
+    "repeat": "Seen 1 time; NOT reproduced in 3 later visits (X-81 and two earlier portal visits returned 200). Low confidence: needs server logs for that timestamp."
+  }
+]

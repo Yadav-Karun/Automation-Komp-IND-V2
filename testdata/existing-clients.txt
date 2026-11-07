@@ -1,0 +1,6 @@
+# Clients created by the automated tests (client name | e-mail | created by | date time).
+# The tests READ this file before registering a client and pick an anime name that is not listed, then APPEND the new client here,
+# so a name is never used twice. Only the text before the first '|' is the client name. Delete a line to free its name again.
+Re Zero | komp.ind.20261107202821syz@yopmail.com | ClientOnboardingE2EHappyFlow | 2026-11-07 08:28:33 pm
+Black Clover | asta@yopmail.com | ClientOnboardingE2EHappyFlow | 2026-11-07 08:35:44 pm
+Chainsaw Man | denji@yopmail.com | ClientOnboardingE2EHappyFlow | 2026-11-07 08:47:41 pm

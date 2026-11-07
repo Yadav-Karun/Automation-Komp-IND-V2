@@ -1,0 +1,10 @@
+target/
+reports/
+config/secrets.local.properties
+tools/recon/profile/
+tools/recon/out/
+tools/recon/bin/
+tools/classpath.txt
+.idea/
+.vscode/
+*.log

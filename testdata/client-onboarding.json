@@ -1,0 +1,20 @@
+{
+  "legalNamePrefix": "KOMP IND Regression Client",
+  "pocNamePrefix": "Regression POC",
+  "emailPrefix": "komp.ind",
+  "emailDomain": "yopmail.com",
+  "organization": {
+    "yearsInIndustry": "7",
+    "website": "https://www.example.com",
+    "productOrServiceDescription": "Industrial machinery components - automated regression test data",
+    "pincode": "201009",
+    "city": "Ghaziabad",
+    "addressLine": "Plot 12, Sector 62, Test Industrial Area",
+    "companyType": "Private Ltd"
+  },
+  "contacts": {
+    "business": { "namePrefix": "Business Contact", "designation": "Business Head" },
+    "finance":  { "namePrefix": "Finance Contact",  "designation": "Finance Manager" },
+    "hr":       { "namePrefix": "HR Contact",       "designation": "HR Manager" }
+  }
+}
