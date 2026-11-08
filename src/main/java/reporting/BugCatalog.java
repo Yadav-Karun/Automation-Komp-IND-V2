@@ -141,7 +141,7 @@ public final class BugCatalog {
                 "Seen on an ACTIVE client whose onboarding completed with both PDFs uploaded in the Organization Details step (the Review page and the MSA flow worked). "
                         + "On Clients > <client> > Company Details > Legal Details the rows 'Upload CIN Document' and 'Upload Tax ID Number (GST Number)' both read 'Not uploaded'. "
                         + "Either the documents are not linked to the client record or the profile does not display them. Every other value of the profile matches the data entered."),
-                "E2E-05");
+                "TC-E2E-04");
     }
 
     static {

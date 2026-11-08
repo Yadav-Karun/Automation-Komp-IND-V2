@@ -1,12 +1,25 @@
 # KOMP IND Testing
 
 Selenium 4 + TestNG + Maven + Extent Reports automation for **KOMP Global client onboarding**.
-The whole client-onboarding module is covered by **two test classes and two XML suites - nothing else**:
+The whole client-onboarding module is covered by **two test classes and two XML suites - nothing else** (the project module below has its own two):
 
-| XML suite | Test class (`src/test/java/tests/`) | What it does | Clients created |
+| XML suite | Test class (`src/test/java/tests/client/`) | What it does | Clients created |
 |---|---|---|---|
 | `testng-client-happy-flow.xml` | `ClientOnboardingE2EHappyFlow` | Register -> ... -> **Active** (17 phases), then opens the client profile (portal *and* admin) and matches every visible value with what was entered | **1** |
 | `testng-client-edge-cases.xml` | `ClientOnboardingEdgeCases` | **Every** negative / edge case: register form, login, first-login password, organization details, documents, contacts, wizard (refresh / Back / re-enter different values), access and session, Clients list search / filters / pagination / sort / columns, MSA search, API health | **1** |
+
+**Project Management module** (projects of an existing client; its own folder `src/test/java/tests/project/`, details in `CLAUDE.md` section 10) - **no client is created**, and the number of projects is limited
+(`utils/ProjectBudget`), the location is always India:
+
+| XML suite | Test class (`src/test/java/tests/project/`) | Cases | Projects created |
+|---|---|---|---|
+| `testng-project-happy-flow.xml` | `ProjectCreationHappyFlow` | TC-PRJ-01 **AOR**, TC-PRJ-02 **EOR**: sign in as the EOR user, create a project for an existing client, find it by its exact name in its listing: status **Active** | **1 AOR + 1 EOR** |
+| `testng-project-edge-cases.xml` | `ProjectCreationEdgeCases` | TC-PRJ-03 **AOR**, TC-PRJ-04 **EOR**: every refused input, boundary and behaviour scenario of the Add Project form, what the listing really holds, search, tabs, client filter, page size, pages, sort, access without a session - all scenarios of a type are steps of ONE case | **at most 5 AOR + 5 EOR** |
+
+```bash
+mvn clean test -Dsuite=testng-project-happy-flow.xml     # ~1 minute
+mvn clean test -Dsuite=testng-project-edge-cases.xml     # ~15 minutes; -Dcases=TC-PRJ-03 (AOR only) / AOR-Q01,AOR-K04 (some scenarios)
+```
 
 **Client names:** both clients get an **anime name** (e.g. "Dragon Ball Z"); the contact person is its main character ("Son Goku", `songoku@yopmail.com`) and the Business / Finance / HR contacts are three
 other characters of the same anime. `testdata/existing-clients.txt` lists the anime already used: it is read before every registration (so one is never used twice) and the new client is appended right
@@ -34,7 +47,7 @@ First-time setup: copy `config/secrets.example.properties` to `config/secrets.lo
 ## Run (the browser is visible and maximized; add `-DHeadless=true` only to hide it)
 ```bash
 mvn clean test                                          # = the happy flow (default suite)
-mvn clean test -Dsuite=testng-client-happy-flow.xml     # happy flow + profile checks      (creates 1 client, ~8 min)
+mvn clean test -Dsuite=testng-client-happy-flow.xml     # happy flow + page-by-page checks (creates 1 client, ~8 min)
 mvn clean test -Dsuite=testng-client-edge-cases.xml     # all negative / edge cases        (creates 1 client, ~20 minutes)
 ```
 Edge cases - options (all optional):
@@ -69,6 +82,8 @@ Screenshots are full-page (the KOMP pages scroll inside their own panel, so the 
 An XML suite with several classes produces one run folder per class (separate HTML and separate screenshots). At the end of every class the console
 and the log print a plain summary (cases / passed / FAILED / skipped and the report paths).
 A FAIL on a negative case means a finding: the application accepted input it should reject, showed no (or a misleading, or a raw database) message, or a visible value differs from what was entered.
+**The reports are written for people who are not technical** (every module, also future ones): each step says "What should happen" and "What happened" in everyday words, a failed case starts with
+"FAILED because: ..." in plain sentences, and the technical evidence (error traces, server requests) is folded into a "Technical details (only for developers)" block. The rule and the helper (`utils/PlainText`) are in `CLAUDE.md` section 2.
 
 **The full guide - every test case with what it tests, rules, run options, live facts, bugs found - is in [`CLAUDE.md`](CLAUDE.md).**
 
@@ -77,8 +92,8 @@ A FAIL on a negative case means a finding: the application accepted input it sho
 |---|---|
 | L-01..L-09, L-20 | Login (signed out; L-09 is the wrong password of the edge client, run late) |
 | B-01..B-09 | Protected URLs without a session |
-| R-01..R-20, R-30..R-33, R-40, R-50..R-52, R-60 | Register Client form (R-60 registers THE edge client) |
-| P-00..P-02, P-10..P-23, P-30 | Welcome mail, first login, password rules, permanent password |
+| R-01..R-20, R-30, R-32, R-33, R-40, R-60 | Register Client form (R-60 registers THE edge client) |
+| P-00, P-02, P-10..P-23, P-30 | Welcome mail, first login, password rules, permanent password |
 | B-10..B-21, B-26 | The client on admin URLs, session / reload |
 | O-00..O-25 | Organization Details (step 1) |
 | D-01..D-11, D-20 | Documents |
@@ -89,8 +104,11 @@ A FAIL on a negative case means a finding: the application accepted input it sho
 | X-40..X-65 | Pagination, page size, tiles vs list, sorting, Columns menu |
 | X-70..X-72, X-80, X-81 | MSA search, API health (admin and client) |
 
-`R-31` and `R-50..R-52` would create an EXTRA client if the application accepts their input, so a full run skips them (reported as SKIP with the reason); run them on purpose with `-Dcases=R-31`.
-Happy-flow ids: `TC-E2E-01` (the journey) and `E2E-02..E2E-07` (client portal My Profile, admin profile header / Company Details / documents / Points of Contact / signed MSA).
+Skips in a run: `O-15..O-19` (read-only pre-filled fields, nothing to type) and `R-60` only when an existing client is reused with `-Dedge.client.email` (nothing is registered; the first-login password cases are not run then either).
+The cases that could register an EXTRA client (`R-31`, `R-50..R-52`) and `P-01` were removed from the suite, so nothing is skipped because of the client limit.
+Happy-flow ids (always numbered from 1): `TC-E2E-01` (the journey; SKIP when an existing client is re-checked) and, in this order, `TC-E2E-02` MSA list shows ACTIVE, `TC-E2E-03` Clients list shows Active,
+`TC-E2E-04` admin profile (every value in one table, incl. the documents), `TC-E2E-05` Point of Contact tab, `TC-E2E-06` MSA tab, `TC-E2E-07` client sign-in + My Profile, `TC-E2E-08` every client-portal tab
+(Home, Employees, Projects, MSA). Each page is one case with ONE table of values (wrong ones in red) and one screenshot.
 
 ## Design notes
 - `pages/` page objects, `flow/ClientOnboardingFlow` one method per journey phase, `base/BaseTest` the shared lifecycle (one browser and one report per class,

@@ -1,4 +1,4 @@
-package tests;
+package tests.client;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -52,7 +52,6 @@ import pages.PointOfContactPage;
 import pages.RegisterClientPage;
 import pages.ReviewInformationPage;
 import reporting.ExecutionInfo;
-import reporting.TcCatalog;
 import reporting.TestReporter;
 import utils.ClientNames;
 import utils.ConfigManager;
@@ -61,6 +60,7 @@ import utils.FormFeedback.Outcome;
 import utils.Log;
 import utils.PageProbe;
 import utils.PageProbe.Landing;
+import utils.PlainText;
 import utils.SecretMasker;
 import utils.TestDataGenerator;
 import utils.ToastWatcher;
@@ -77,8 +77,8 @@ import utils.ToastWatcher;
  * the edge client with R-60 (a double click on 'Register Client': it must still create exactly one client) and then walks that
  * client through the wizard: enter details, move next, go back, re-enter different values ... The wizard is NEVER confirmed
  * ('Confirm &amp; Continue' starts the MSA) and no client is ever approved, so the edge client stays In-Progress.
- * Cases that would create an EXTRA client when the app accepts their input (R-31, R-50..R-52) are skipped in a full run and
- * only run when named in -Dcases.
+ * Cases that could register an EXTRA client when the app accepts their input are NOT part of this class (removed on the user's
+ * request: duplicate legal name in another case + trailing space, special characters in the legal name, wrong temporary password).
  *
  * ORDER OF A FULL RUN: login negatives -> unauthenticated URLs -> register form negatives (admin) -> R-60 registers the client
  * -> welcome mail -> first-login password rules -> client on admin URLs / session -> Organization Details + documents
@@ -107,16 +107,16 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     private static final String G_ORG = "A4 Organization details";
     private static final String G_DOC = "A5 Documents";
     private static final String G_POC = "A6 Points of contact";
-    private static final String G_URL = "B1 Direct URL (no session)";
-    private static final String G_ROLE = "B2 Role boundary (client session)";
-    private static final String G_SESSION = "B3 Session and reload";
-    private static final String G_WIZARD = "B4 Wizard flow";
-    private static final String G_EOR = "B5 EOR status of ACTIVE client";
+    private static final String G_URL = "B1 Opening pages directly (not signed in)";
+    private static final String G_ROLE = "B2 What a client must not see";
+    private static final String G_SESSION = "B3 Staying signed in";
+    private static final String G_WIZARD = "B4 Onboarding steps (Back, refresh, review)";
+    private static final String G_EOR = "B5 Approval status of an ACTIVE client";
     private static final String G_SEARCH = "C1 Clients search";
     private static final String G_FILTER = "C2 Clients filters";
     private static final String G_TABLE = "C3 Clients table controls";
     private static final String G_MSA = "C4 MSA list search";
-    private static final String G_API = "C5 API health (read-only)";
+    private static final String G_API = "C5 Server errors (read-only)";
 
     private static final String WRONG = "Wrong#Pass123";
     private static final String[] ORG_FIELDS = { "years_in_industry", "website_link", "product_or_service_description",
@@ -233,8 +233,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             loginPage.login(user, password);
         } catch (AssertionError e) {
             if (LoginPage.isRateLimited(List.of(String.valueOf(e.getMessage())))) {
-                throw new SkipException("Sign-in is rate limited by the application ('Too many sign-in attempts') and the wait budget "
-                        + "(login.ratelimit.max.wait.seconds) is used up: run this case again in a few minutes");
+                throw new SkipException("The application temporarily blocked the sign-in ('Too many sign-in attempts') and the waiting time ran out. "
+                        + "This is not a result of the test: run this case again in a few minutes");
             }
             throw e;
         }
@@ -326,14 +326,14 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         } catch (RuntimeException | Error t) {
             if (utils.Connectivity.isNetworkFailure(driver, t)) {
                 // the connection was lost while the state was prepared: not an application result
-                String reason = "The network connection to the application was lost while this case was being prepared ("
-                        + utils.Connectivity.describe(t) + "). This is not an application result: run the case again (-Dcases=" + id + ").";
+                String reason = "The internet connection to the application was lost while this case was being prepared, so the result is unknown "
+                        + "(this is not a problem of the application). Run the test again. [" + utils.Connectivity.describe(t) + "]";
                 skipRow(id, group, title, reason);
                 throw new SkipException(reason);
             }
             TestReporter rep = TestReporter.start(id, group, title, group + " negative test: " + title, "-",
-                    "The session / wizard step this case needs can be prepared", driver, data);
-            rep.phase("prepare", "Prepare the state this case needs", "The session / wizard step is ready", () -> {
+                    "The test can bring the application into the state this case needs", driver, data);
+            rep.phase("prepare", "Prepare the state this case needs", "The application is in the state this case needs (signed in, on the right step)", () -> {
                 if (t instanceof Error) {
                     throw (Error) t;
                 }
@@ -348,22 +348,12 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         rep.finish("SKIP", new SkipException(reason));
     }
 
-    /** A case that creates an EXTRA client when the app accepts its input only runs when it is named in -Dcases (2-client rule). */
-    private void skipUnlessNamed(String id, String group, String title) {
-        if (TcCatalog.SIDE_EFFECT.contains(id) && !casesFilterActive()) {
-            String reason = "Not run in a full run: if the application accepts this input it creates an EXTRA client, and the module is limited to "
-                    + "2 clients. Run it on purpose with -Dcases=" + id;
-            skipRow(id, group, title, reason);
-            throw new SkipException(reason);
-        }
-    }
-
     // ================================================================== infrastructure: set-up chain (each step once, on demand)
 
     private void failedBefore(String step) {
         String why = setupFailed.get(step);
         if (why != null) {
-            throw new SkipException("Prerequisite " + step + " failed earlier, so this case cannot run: " + why);
+            throw new SkipException("A step this case depends on (" + step + ") failed earlier, so this case could not run: " + why);
         }
     }
 
@@ -390,7 +380,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     private SkipException setupFailure(String step, TestReporter rep, Throwable t) {
         setupFailed.put(step, firstLine(t));
         rep.finish("FAIL", t);
-        return new SkipException("Prerequisite " + step + " failed (" + firstLine(t) + "): the cases that need it are skipped");
+        return new SkipException("A step that other cases depend on (" + step + ") failed (" + firstLine(t) + "): the cases that need it were not run");
     }
 
     /** P-00: the edge client is registered (single click, unless R-60 already did it with a double click) and its welcome mail is read. */
@@ -399,7 +389,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             return;
         }
         failedBefore("P-00");
-        TestReporter rep = TestReporter.start("P-00", G_SETUP, "Setup: register the edge client and read its welcome e-mail",
+        TestReporter rep = TestReporter.start("P-00", G_SETUP, "Setup: register the test client and read its welcome e-mail",
                 "Creates the ONE client used by every lifecycle case of this class (2-client rule)",
                 "Valid unique data, all yopmail addresses (" + data.email + ")",
                 "Client registered, welcome mail with the temporary password received", driver, data);
@@ -433,11 +423,11 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     /** P-02: first login with the temporary password, the 'Set a new password' dialog is open. */
     private void ensureDialog() {
         if (reuse) {
-            throw new SkipException("Existing client (-Dedge.client.email): the first-login password cases need a client that never logged in");
+            throw new SkipException("An existing client is being reused. The first-login password cases need a client that has never signed in, so they are not run");
         }
         ensureMailRead();
         if (passwordChanged || passwordSet) {
-            throw new SkipException("The first login was already completed (the password was changed), the dialog is gone");
+            throw new SkipException("The first sign-in was already completed (the password was changed), so the 'Set a new password' window is no longer there");
         }
         if (atDialog) {
             if (pwdPage.isOpenNow()) {
@@ -447,7 +437,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             loginPage.login(data.email, tempPassword);
             if (!pwdPage.isDisplayed()) {
                 atDialog = false;
-                throw new SkipException("The 'Set a new password' dialog is no longer reachable");
+                throw new SkipException("The 'Set a new password' window can no longer be reached");
             }
             session = Who.NONE;
             return;
@@ -455,7 +445,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         failedBefore("P-02");
         TestReporter rep = TestReporter.start("P-02", G_SETUP, "Setup: first login with the temporary password",
                 "Reaches the 'Set a new password' dialog", "Temporary password from the welcome e-mail: " + SecretMasker.reveal(tempPassword),
-                "'Set a new password' dialog shown", driver, data);
+                "The 'Set a new password' window should open", driver, data);
         try {
             rep.phase("client_portal_login", "Client portal login with temporary password", "Set a new password dialog displayed",
                     flow(rep)::clientPortalLogin);
@@ -563,7 +553,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             ensureOrgStep();
             TestReporter rep = TestReporter.start("C-00", G_POC, "Setup: reach Points of Contact with valid data",
                     "Valid baseline for the single-field negative cases", "Valid organization data + documents, valid three contacts",
-                    "Wizard reaches step 2 and accepts the valid contacts", driver, data);
+                    "The onboarding form should reach step 2 (Points of Contact) and accept the valid contacts", driver, data);
             try {
                 rep.phase("to_points_of_contact", "Continue to Points of Contact", "Step 2 open", () -> {
                     orgPage.clickContinue();
@@ -742,22 +732,22 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     private static void cmp(List<String> bad, String field, String expected, String actual) {
         if (!java.util.Objects.equals(expected == null ? null : expected.trim(), actual == null ? null : actual.trim())
                 && !(expected != null && actual != null && expected.equalsIgnoreCase(actual) && field.contains("mail"))) {
-            bad.add(field + ": expected '" + expected + "' but was '" + actual + "'");
+            bad.add(field + ": should be '" + expected + "' but is '" + actual + "'");
         }
     }
 
     private static void contactCmp(List<String> bad, String name, ClientData.Contact c, Map<String, String> shown) {
-        cmp(bad, name + " POC name", c.name, shown.get("Name"));
-        cmp(bad, name + " POC designation", c.designation, shown.get("Designation"));
-        cmp(bad, name + " POC email", c.email, shown.get("Email"));
-        cmp(bad, name + " POC phone", c.phone, shown.get("Contact Number"));
+        cmp(bad, name + " contact name", c.name, shown.get("Name"));
+        cmp(bad, name + " contact designation", c.designation, shown.get("Designation"));
+        cmp(bad, name + " contact e-mail", c.email, shown.get("Email"));
+        cmp(bad, name + " contact phone number", c.phone, shown.get("Contact Number"));
     }
 
     private void assertNoAlert() {
         try {
             String text = driver.switchTo().alert().getText();
             driver.switchTo().alert().accept();
-            Assert.fail("A JavaScript alert ran from user-supplied text (possible XSS): '" + text + "'");
+            Assert.fail("The text that was typed in made the page run a script (a security risk): the pop-up said '" + text + "'");
         } catch (NoAlertPresentException ok) {
             // nothing executed
         }
@@ -790,7 +780,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     @Test(priority = 100, dataProvider = "badLogins")
     public void invalidLoginIsRejected(String id, String title, String input, String user, String pass) {
         onlyIfSelected(id);
-        mustReject(id, G_LOGIN, title, input, "Sign-in is refused, the user stays on the login page, and a message explains the problem",
+        mustReject(id, G_LOGIN, title, input, "The application should refuse the sign-in, keep the user on the login page, and show a message that explains the problem",
                 data, new String[0], () -> {
                     signedOut();
                     return rejectedLogin(user, pass);
@@ -803,7 +793,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         List<String> all = new ArrayList<>(o.messages);
         all.addAll(o.toasts);
         if (!o.accepted && LoginPage.isRateLimited(all)) {
-            throw new SkipException("Sign-in is rate limited by the application ('Too many sign-in attempts'): run this case again in a few minutes");
+            throw new SkipException("The application temporarily blocked the sign-in ('Too many sign-in attempts'). This is not a result of the test: run this case again in a few minutes");
         }
         return o;
     }
@@ -811,13 +801,13 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // L-20 - The password box on the login page hides what is typed (input type = password).
     @Test(priority = 110)
     public void passwordFieldIsMasked() {
-        runCase("L-20", G_LOGIN, "Password field is masked", "Text typed into the password field", "Input type is 'password' (characters hidden)",
+        runCase("L-20", G_LOGIN, "Password field is masked", "Text typed into the password field", "The characters typed into the password box should be hidden",
                 Who.NONE, () -> {
                     signedOut();
                     loginPage.typeIntoPasswordOnly("Visible#Check1");
                     String type = loginPage.passwordFieldType();
-                    Assert.assertEquals(type, "password", "Password field type is '" + type + "', so the typed password is readable on screen.");
-                    return "Password input type = " + type;
+                    Assert.assertEquals(type, "password", "The password box shows what is typed (its type is '" + type + "'), so the password can be read on screen.");
+                    return "The password box hides what is typed.";
                 });
     }
 
@@ -835,13 +825,13 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // /candidates, /appraisal). Expected: the login page, never the page content.
     @Test(priority = 200, dataProvider = "protectedUrls")
     public void protectedUrlRequiresLogin(String id, String path) {
-        runCase(id, G_URL, "Opening " + path + " without a session shows the login page",
-                "Fresh browser session (no cookies / storage), open " + base() + path,
-                "The user is sent to the login page and no protected content is shown", Who.NONE, () -> {
+        runCase(id, G_URL, "Opening " + path + " without being signed in shows the login page",
+                "A new browser window where nobody is signed in: the address " + base() + path + " is opened",
+                "The user should be sent to the login page and must not see any protected page", Who.NONE, () -> {
                     signedOut();
                     Landing l = PageProbe.open(driver, base() + path, 10);
-                    Assert.assertFalse(l.adminContent, "Protected admin content is visible without a session. " + l.describe());
-                    Assert.assertTrue(l.loginForm && l.path.contains("/login"), "Not redirected to the login page. " + l.describe());
+                    Assert.assertFalse(l.adminContent, "Someone who is not signed in can see a protected page. " + l.describe());
+                    Assert.assertTrue(l.loginForm && l.path.contains("/login"), "Someone who is not signed in was not sent to the login page. " + l.describe());
                     return l.describe();
                 });
     }
@@ -850,19 +840,18 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     @Test(priority = 210)
     public void unknownRouteIsNotBlank() {
         runCase("B-09", G_URL, "Unknown URL shows a login or a friendly 'not found' page, not a blank page",
-                "Fresh session, open " + base() + "/no-such-page-xyz", "Login page or a readable not-found message; never a blank page or raw error",
+                "Nobody is signed in; the address " + base() + "/no-such-page-xyz" + " is opened", "Login page or a readable not-found message; never a blank page or raw error",
                 Who.NONE, () -> {
                     signedOut();
                     Landing l = PageProbe.open(driver, base() + "/no-such-page-xyz", 10);
-                    Assert.assertFalse(l.blank, "Blank page for an unknown route. " + l.describe());
-                    Assert.assertTrue(l.loginForm || l.denied, "Unknown route shows neither the login page nor a not-found message. " + l.describe());
+                    Assert.assertFalse(l.blank, "An address that does not exist shows an empty page. " + l.describe());
+                    Assert.assertTrue(l.loginForm || l.denied, "An address that does not exist shows neither the login page nor a 'not found' message. " + l.describe());
                     return l.describe();
                 });
     }
 
     // ================================================================== R - Register Client form (admin side)
-    // A rejected case creates nothing. R-31 and R-50..R-52 would create an EXTRA client if the app accepts the input: they only
-    // run when named in -Dcases. R-60 registers THE edge client.
+    // A rejected case creates nothing. R-60 registers THE edge client (the only registration of this class).
 
     private void openRegisterForm() {
         clientsPage.open();
@@ -944,7 +933,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         ClientData d = newData();
         mutate.accept(d);
         mustReject(id, G_REG, title, input,
-                "Form is not submitted, stays on Register Client, no client is created, and a clear validation message is shown",
+                "The application should refuse the entry, stay on the Register Client page, create no client, and show a clear message that explains what is wrong",
                 d, keywords, () -> registerAttempt(d));
     }
 
@@ -952,18 +941,15 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public Object[][] duplicates() {
         return new Object[][] {
             { "R-30", "Duplicate legal entity name", "Legal Entity Name = name of an existing client (same case)", "name" },
-            { "R-31", "Duplicate legal entity name, different case + trailing space", "Existing client name in UPPER CASE + trailing space", "name" },
             { "R-32", "Duplicate email", "Email = e-mail of an existing client", "email" },
             { "R-33", "Duplicate email, different case", "Email = existing client e-mail in UPPER CASE", "email" },
         };
     }
 
-    // R-30..R-33 - Register a client whose legal name or e-mail already exists (same case, and UPPER CASE + trailing space). Expected: refused with a duplicate message.
-    // R-31 is skipped in a full run (it creates an EXTRA client if the app accepts it, which is the known bug): run it on purpose with -Dcases=R-31.
+    // R-30, R-32, R-33 - Register a client whose legal name (same case) or e-mail (same and UPPER CASE) already exists. Expected: refused with a duplicate message.
     @Test(priority = 310, dataProvider = "duplicates")
     public void duplicateRegistrationIsRejected(String id, String title, String input, String keyword) {
         onlyIfSelected(id);
-        skipUnlessNamed(id, G_REG, title);
         prepare(id, G_REG, title, () -> {
             adminSession();
             existingClient();
@@ -972,12 +958,11 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         ClientData d = newData();
         switch (id) {
             case "R-30" -> d.legalName = existing.company;
-            case "R-31" -> d.legalName = existing.company.toUpperCase() + " ";
             case "R-32" -> d.email = existing.email;
             default -> d.email = existing.email.toUpperCase();
         }
         mustReject(id, G_REG, title, input + " (existing: " + existing.company + " / " + existing.email + ")",
-                "Registration is refused with a duplicate message; no second client is created", d, new String[] { keyword }, () -> registerAttempt(d));
+                "The application should refuse the registration with a message that the client already exists, and create no second client", d, new String[] { keyword }, () -> registerAttempt(d));
     }
 
     // R-40 - The Contact Number box keeps at most 10 characters (typing 11 digits; nothing is submitted).
@@ -995,51 +980,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             only.mobile = "98765432101";
             registerPage.fillPartial(only);
             String v = registerPage.mobileValue();
-            Assert.assertTrue(v.length() <= 10, "Contact Number field accepted " + v.length() + " characters: '" + v + "'");
-            return "Field value is '" + v + "' (" + v.length() + " characters)";
-        });
-        assertNoDefects(rep);
-    }
-
-    @DataProvider(name = "specialNames")
-    public Object[][] specialNames() {
-        return new Object[][] {
-            { "R-50", "HTML/script in legal entity name", "<b>Bold</b> <script>alert(1)</script> Ltd" },
-            { "R-51", "Unicode and emoji in legal entity name", "Ünïcode 株式会社 😀 Ltd" },
-            { "R-52", "SQL-like text in legal entity name", "Robert'); DROP TABLE clients;-- Ltd" },
-        };
-    }
-
-    // R-50..R-52 - Special text in the legal name: HTML + script, Unicode + emoji, SQL-like text. Expected: rejected, or stored and shown literally with no script running.
-    // Skipped in a full run (it creates an EXTRA client if accepted): run on purpose with -Dcases=R-50.
-    /**
-     * Names are free text, so these may be legitimately accepted: the check is that the text is stored and shown literally and that
-     * no script runs. If accepted, ONE extra client is created - therefore only when named in -Dcases.
-     */
-    @Test(priority = 330, dataProvider = "specialNames")
-    public void specialCharactersAreHandledSafely(String id, String title, String namePart) {
-        onlyIfSelected(id);
-        skipUnlessNamed(id, G_REG, title);
-        prepare(id, G_REG, title, this::adminSession);
-        ClientData d = newData();
-        d.legalName = namePart + " " + d.runId;
-        TestReporter rep = TestReporter.start(id, G_REG, title, "Register client form: special characters in free text",
-                "Legal Entity Name = " + d.legalName,
-                "Either rejected with a message, or accepted and shown literally in the Clients list with no script executed", driver, d);
-        rep.phase(slug(id), title, "Rejected with a message, or stored and displayed literally; no script execution", () -> {
-            Outcome o = registerAttempt(d);
-            assertNoAlert();
-            if (!o.accepted) {
-                if (!o.hasFeedback()) {
-                    rep.defect("Input rejected silently: no validation message", "A visible message", o.describe());
-                }
-                return "Rejected. " + o.describe();
-            }
-            ClientsPage.Row row = clientsPage.findClient(d.legalName);
-            assertNoAlert();
-            Assert.assertEquals(row.company, d.legalName, "Stored/displayed legal name differs from what was entered");
-            rawErrorLeak(rep, o);
-            return "Accepted and displayed literally: '" + row.company + "'. One extra client was created (" + row.status + ").";
+            Assert.assertTrue(v.length() <= 10, "The Contact Number box accepted " + v.length() + " characters ('" + v + "') although it should keep at most 10.");
+            return "The box kept " + v.length() + " characters: '" + v + "'.";
         });
         assertNoDefects(rep);
     }
@@ -1055,14 +997,14 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         onlyIfSelected("R-60");
         String title = "Double-click on Register Client creates one client";
         if (existingGiven || registered) {
-            String why = existingGiven ? "Existing client (-Dedge.client.email): nothing is registered"
-                    : "The edge client was already registered by a set-up step (single click)";
+            String why = existingGiven ? "An existing client is being reused, so no new client is registered in this run"
+                    : "The test client was already registered by an earlier set-up step (with a single click)";
             skipRow("R-60", G_REG, title, why);
             throw new SkipException(why);
         }
         prepare("R-60", G_REG, title, this::adminSession);
         TestReporter rep = TestReporter.start("R-60", G_REG, title,
-                "Register client form: duplicate submission. This registration IS the ONE edge client of the run (2-client rule)",
+                "Register Client form: submitting twice at the same moment. This registration creates the one test client of this run",
                 "Valid data (" + data.legalName + "); Register Client clicked twice in the same instant", "Exactly one client is created", driver, data);
         rep.phase("r_60", "Double submit", "Exactly one row for the new client in the Clients list", () -> {
             openRegisterForm();
@@ -1086,9 +1028,11 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             if (registered) {
                 saveClientData();
             }
-            Assert.assertEquals(rows, 1, "Double-click created " + rows + " clients named '" + data.legalName + "' (toasts: " + toasts + ")");
+            Assert.assertEquals(rows, 1, "Double-clicking on Register Client created " + rows + " clients named '" + data.legalName + "' instead of one. "
+                    + new Outcome(true, List.of(), toasts).describe());
             rawErrorLeak(rep, new Outcome(true, List.of(), toasts));
-            return "One client created (success toasts seen: " + toastCount + ", rows in list: " + rows + ")";
+            return "Exactly one client was created: the application showed " + PlainText.count((int) toastCount, "success notice", "success notices")
+                    + " and the Clients list has " + PlainText.count(rows, "row", "rows") + " for it.";
         });
         assertNoDefects(rep);
     }
@@ -1102,24 +1046,6 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         if (!reuse) {
             ensureMailRead(); // writes the P-00 case
         }
-    }
-
-    // P-01 - Sign in as the new client with a WRONG temporary password (single attempt). Expected: refused with a message.
-    @Test(priority = 420)
-    public void p01_wrongTemporaryPassword() {
-        onlyIfSelected("P-01");
-        String title = "Login with a wrong temporary password";
-        if (reuse) {
-            String why = "Existing client (-Dedge.client.email): needs a client that never logged in";
-            skipRow("P-01", G_PWD, title, why);
-            throw new SkipException(why);
-        }
-        prepare("P-01", G_PWD, title, this::ensureMailRead);
-        mustReject("P-01", G_PWD, title, "The edge client's e-mail + a wrong password (single attempt)",
-                "Sign-in refused with a message; the user stays on the login page", data, new String[0], () -> {
-                    signedOut();
-                    return rejectedLogin(data.email, WRONG);
-                });
     }
 
     // P-02 (set-up) - First login with the temporary password. Expected: the "Set a new password" dialog appears.
@@ -1168,7 +1094,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         String current = "TEMP".equals(cur) ? tempPassword : cur;
         String newPw = "TEMP".equals(neu) ? tempPassword : neu;
         String confirm = "TEMP".equals(conf) ? tempPassword : conf;
-        mustReject(id, G_PWD, title, input, "Password change refused with a message; the dialog stays open and the password is unchanged",
+        mustReject(id, G_PWD, title, input, "The application should refuse the password change with a message, keep the window open, and leave the password unchanged",
                 data, new String[0], () -> {
                     pwdPage.clearAll();
                     Outcome o = pwdPage.attempt(current, newPw, confirm);
@@ -1205,12 +1131,12 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void clientCannotOpenAdminPage(String id, String path) {
         runCase(id, G_ROLE, "Client cannot open admin page " + path,
                 "Signed in as the edge client (" + SecretMasker.maskEmail(data.email) + " / " + SecretMasker.reveal(activePassword) + "), open " + base() + path,
-                "The client is redirected away or told access is denied; no admin content is shown", Who.CLIENT, () -> {
+                "The client should be sent away or told that access is denied, and must not see any admin page", Who.CLIENT, () -> {
                     Landing l = PageProbe.open(driver, base() + path, 15);
-                    Assert.assertFalse(l.adminContent, "A CLIENT can see admin console content. " + l.describe());
-                    Assert.assertFalse(l.blank, "The client is left on an empty / stuck-loading page (no redirect, no message). " + l.describe());
+                    Assert.assertFalse(l.adminContent, "A client (customer) can see a page of the admin area. " + l.describe());
+                    Assert.assertFalse(l.blank, "The client is left on an empty page: the application neither sent them elsewhere nor showed a message. " + l.describe());
                     boolean blocked = !l.path.startsWith(path) || l.denied;
-                    Assert.assertTrue(blocked, "Client stayed on the admin URL with no redirect and no access-denied message. " + l.describe());
+                    Assert.assertTrue(blocked, "The client stayed on the admin address: the application neither sent them elsewhere nor said that access is denied. " + l.describe());
                     return l.describe();
                 });
     }
@@ -1219,9 +1145,9 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     @Test(priority = 510)
     public void clientOnAdminRootSeesPortal() {
         runCase("B-18", G_ROLE, "Client opening the root URL / lands in the client portal",
-                "Signed in as the edge client, open " + base() + "/", "Client portal home (/portal), not the admin dashboard", Who.CLIENT, () -> {
+                "Signed in as the edge client, open " + base() + "/", "The client portal home (/portal) should open, not the admin dashboard", Who.CLIENT, () -> {
                     Landing l = PageProbe.open(driver, base() + "/", 10);
-                    Assert.assertFalse(l.adminContent, "A CLIENT can see admin console content at /. " + l.describe());
+                    Assert.assertFalse(l.adminContent, "A client (customer) can see a page of the admin area at the main address /. " + l.describe());
                     return l.describe();
                 });
     }
@@ -1230,7 +1156,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     @Test(priority = 520)
     public void loginPageWhenAlreadySignedInClient() {
         runCase("B-19", G_ROLE, "Signed-in client opening /login is sent back to the portal",
-                "Signed in as the edge client, open " + base() + "/login", "Redirect to the portal (a signed-in user is not shown the login form)", Who.CLIENT, () -> {
+                "Signed in as the edge client, open " + base() + "/login", "The user should be sent back to the portal (a signed-in user must not be shown the login form again)", Who.CLIENT, () -> {
                     Landing l = PageProbe.open(driver, base() + "/login", 8);
                     Assert.assertFalse(l.loginForm, "A signed-in client is shown the login form again. " + l.describe());
                     return l.describe();
@@ -1244,7 +1170,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                 "Signed in as the edge client, open " + base() + "/no-such-page-xyz", "Not-found message or redirect to the portal; never a blank page",
                 Who.CLIENT, () -> {
                     Landing l = PageProbe.open(driver, base() + "/no-such-page-xyz", 10);
-                    Assert.assertFalse(l.blank, "Blank page for an unknown route (signed in). " + l.describe());
+                    Assert.assertFalse(l.blank, "An address that does not exist shows an empty page (client signed in). " + l.describe());
                     return l.describe();
                 });
     }
@@ -1252,7 +1178,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // B-21 - A full page reload of /portal keeps the client signed in.
     @Test(priority = 540)
     public void clientSessionSurvivesReload() {
-        runCase("B-21", G_SESSION, "Client session survives a reload of the portal URL",
+        runCase("B-21", G_SESSION, "The client stays signed in after the portal page is reloaded",
                 "Signed in as the edge client, open " + base() + "/portal again (full page load)", "Still signed in on the portal; no login prompt", Who.CLIENT, () -> {
                     Landing l = PageProbe.open(driver, base() + "/portal", 10);
                     Assert.assertFalse(l.loginForm, "Reloading /portal logged the client out. " + l.describe());
@@ -1266,9 +1192,9 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         runCase("B-26", G_SESSION, "Refresh (F5) on the client portal keeps the client signed in",
                 "Signed in as the edge client on /portal, press F5", "The portal home is shown again, no login prompt", Who.CLIENT, () -> {
                     driver.navigate().refresh();
-                    Landing l = PageProbe.settle(driver, "F5 on /portal", 10);
-                    Assert.assertFalse(l.loginForm, "F5 logged the client out. " + l.describe());
-                    Assert.assertFalse(l.blank, "F5 left a blank page. " + l.describe());
+                    Landing l = PageProbe.settle(driver, "pressing F5 on /portal", 10);
+                    Assert.assertFalse(l.loginForm, "Pressing F5 signed the client out. " + l.describe());
+                    Assert.assertFalse(l.blank, "Pressing F5 left an empty page. " + l.describe());
                     return l.describe();
                 });
     }
@@ -1305,6 +1231,22 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         };
     }
 
+    /** The plain name of a form field, for the report ("registered_address.pincode" -> "Pincode"). */
+    private static String fieldLabel(String key) {
+        return switch (key) {
+            case "years_in_industry" -> "Years in industry";
+            case "website_link" -> "Website";
+            case "product_or_service_description" -> "Product or service description";
+            case "registered_address.pincode" -> "Pincode";
+            case "registered_address.address" -> "Address";
+            case "email" -> "Registered e-mail";
+            case "mobile_number" -> "Registered mobile number";
+            case "company_registration_number" -> "CIN (company registration number)";
+            case "gst_number" -> "GSTIN (GST number)";
+            default -> key.replace('_', ' ');
+        };
+    }
+
     // O-01..O-25 - Organization Details with ONE bad field on an otherwise valid form: years in industry (empty, -5, abc, 1000), website (empty, not a URL, javascript:),
     // description empty, pincode (empty, 5 digits, 7 digits, letters, 000000), address empty, registered e-mail / mobile (read-only fields: skipped), CIN and GSTIN (empty,
     // bad format, too long). Expected: Continue is refused with a message and the wizard stays on step 1. Many of these are known bugs (no format validation).
@@ -1313,7 +1255,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         onlyIfSelected(id);
         prepare(id, G_ORG, title, this::ensureOrgStep);
         if (!orgPage.isEditable(field)) {
-            String why = "Field '" + field + "' is read-only (pre-filled from registration): nothing to type";
+            String why = "The '" + fieldLabel(field) + "' field is filled in automatically and cannot be edited, so there is nothing to test";
             skipRow(id, G_ORG, title, why);
             throw new SkipException(why);
         }
@@ -1322,8 +1264,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         // a rejected website must say so: the empty website already gets 'Website is required'
         String[] keywords = field.equals("website_link") && !bad.isEmpty() ? new String[] { "website" } : new String[0];
         try {
-            mustReject(id, G_ORG, title, "Valid form, only '" + field + "' set to '" + abbreviate(bad) + "'",
-                    "Continue is refused with a message; the wizard stays on Organization Details", data, keywords, () -> {
+            mustReject(id, G_ORG, title, "All fields are filled in correctly except one: " + fieldLabel(field) + " = " + (bad.isEmpty() ? "(left empty)" : "'" + abbreviate(bad) + "'"),
+                    "The application should refuse to continue, show a message, and stay on the Organization Details step", data, keywords, () -> {
                         orgPage.setField(field, bad);
                         lastOutcome = orgPage.continueAttempt();
                         return lastOutcome;
@@ -1395,8 +1337,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         Path file = testFile(fileKey);
         String name = file.getFileName().toString();
         try {
-            mustReject(id, G_DOC, title, (cinSlot ? "CIN" : "GST") + " slot, file '" + abbreviate(name) + "' (" + Files.size(file) + " bytes)",
-                    "Upload is refused with a message and no document is attached", data, new String[0],
+            mustReject(id, G_DOC, title, "The file '" + abbreviate(name) + "' (" + Files.size(file) + " bytes) was uploaded as the " + (cinSlot ? "CIN" : "GST") + " document",
+                    "The application should refuse the file with a message and attach no document", data, new String[0],
                     () -> orgPage.uploadAttempt(cinSlot, file.toString(), name));
         } finally {
             // an accepted bad file must not stay attached (the evidence was already captured by the phase)
@@ -1419,7 +1361,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             Outcome o = orgPage.uploadAttempt(true, f.toString(), f.getFileName().toString());
             Assert.assertTrue(o.accepted, "Valid PDF with special characters in the name was refused: " + o.describe());
             orgPage.removeAllDocuments();
-            return "Accepted and shown; removed again";
+            return "The file was accepted and shown; it was removed again afterwards.";
         });
     }
 
@@ -1438,7 +1380,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
             Assert.assertEquals(orgPage.documentCount(), 0, "Document still attached after Remove");
             orgPage.uploadCin(data.cinDocPath, name);
             Assert.assertEquals(orgPage.documentCount(), 1, "Re-upload after Remove did not attach the document");
-            return "Upload ok, Remove ok, re-upload ok";
+            return "The document was uploaded, removed and uploaded again without problems.";
         });
     }
 
@@ -1448,8 +1390,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         onlyIfSelected("D-20");
         prepare("D-20", G_DOC, "Continue with no CIN and no GST document", this::emptyDocumentSlots);
         mustReject("D-20", G_DOC, "Continue with no CIN and no GST document",
-                "Valid organization data, both documents removed (assumes documents are mandatory - confirm with product)",
-                "Continue is refused with a message asking for the documents", data, new String[0], () -> orgPage.continueAttempt());
+                "All fields are filled in correctly but both documents are removed (we assume the documents are mandatory - to be confirmed with the product team)",
+                "The application should refuse to continue and show a message asking for the documents", data, new String[0], () -> orgPage.continueAttempt());
     }
 
     // ================================================================== C - Points of Contact (wizard step 2)
@@ -1487,8 +1429,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         String valid = validPocValue(prefix, field);
         lastOutcome = null;
         try {
-            mustReject(id, G_POC, title, "Valid form, only " + prefix + "." + field + " set to '" + bad + "'",
-                    "Continue is refused with a message; the wizard stays on Points of Contact", data, new String[0], () -> {
+            mustReject(id, G_POC, title, "All fields are filled in correctly except one: " + contactFieldLabel(prefix, field) + " = " + (bad.isEmpty() ? "(left empty)" : "'" + bad + "'"),
+                    "The application should refuse to continue, show a message, and stay on the Points of Contact step", data, new String[0], () -> {
                         pocPage.setField(prefix, field, bad);
                         lastOutcome = pocPage.continueAttempt();
                         return lastOutcome;
@@ -1498,6 +1440,16 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                 pocPage.setField(prefix, field, valid);
             }
         }
+    }
+
+    /** "business" + "contact_no" -> "Business contact phone number". */
+    private static String contactFieldLabel(String prefix, String field) {
+        String what = switch (field) {
+            case "contact_no" -> "phone number";
+            case "email" -> "e-mail";
+            default -> field;
+        };
+        return prefix.substring(0, 1).toUpperCase() + prefix.substring(1) + " contact " + what;
     }
 
     private String validPocValue(String prefix, String field) {
@@ -1517,40 +1469,40 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // to edit) is resumed at that furthest saved step: that is recorded as an observation, not as a failure (the result must not depend on the client's history).
     @Test(priority = 900)
     public void refreshKeepsTheWizardStep() {
-        runCase("B-30", G_WIZARD, "Refresh (F5) inside the wizard keeps the client on the same step",
+        runCase("B-30", G_WIZARD, "Refresh (F5) inside the onboarding steps keeps the client on the same step",
                 "Signed in as the edge client, open the onboarding wizard, press F5",
-                "Still signed in, still on /portal/onboarding, on the same step (or on the furthest step already saved, never an earlier one)", Who.CLIENT, () -> {
+                "Still signed in, still in the onboarding steps, on the same step (or on the furthest step already saved, never an earlier one)", Who.CLIENT, () -> {
                     String before = openWizard();
                     driver.navigate().refresh();
-                    Landing l = PageProbe.settle(driver, "F5 in wizard", 10);
-                    Assert.assertFalse(l.loginForm, "F5 inside the wizard logged the client out. " + l.describe());
+                    Landing l = PageProbe.settle(driver, "pressing F5 in the onboarding steps", 10);
+                    Assert.assertFalse(l.loginForm, "Pressing F5 in the onboarding steps signed the client out. " + l.describe());
                     pocPage.dismissContinueSetupPrompt();
                     String after = waitStep();
-                    Assert.assertTrue(driver.getCurrentUrl().contains("/portal/onboarding"), "F5 left the wizard: " + driver.getCurrentUrl());
+                    Assert.assertTrue(driver.getCurrentUrl().contains("/portal/onboarding"), "Pressing F5 took the client out of the onboarding steps (the browser is at " + driver.getCurrentUrl() + ")");
                     List<String> order = List.of("Organization Details", "Points of Contact", "Review of Information", "Sign MSA");
                     int was = order.indexOf(before);
                     int now = order.indexOf(after);
                     if (was >= 0 && now > was) {
-                        current.note("OBSERVATION (not a defect): the client was on '" + before + "' (it had gone Back); after F5 the wizard resumed at the furthest "
+                        current.note("NOTE (not a problem): the client was on the step '" + before + "' (it had gone Back); after pressing F5 the application resumed at the furthest "
                                 + "saved step '" + after + "'. A client whose saved progress equals the step on screen stays on that step.");
-                        return "Step before F5: " + before + " | after F5: " + after + " (resumed at the furthest saved step)";
+                        return "Before pressing F5 the client was on the step '" + before + "'; afterwards on '" + after + "' (the application resumed at the furthest saved step).";
                     }
-                    Assert.assertEquals(after, before, "F5 moved the client from step '" + before + "' to '" + after + "'");
-                    return "Step before F5: " + before + " | after F5: " + after;
+                    Assert.assertEquals(after, before, "Pressing F5 moved the client from the step '" + before + "' to the step '" + after + "'");
+                    return "Before and after pressing F5 the client was on the step '" + before + "'.";
                 });
     }
 
     // B-31 - The browser Back button from the wizard keeps the client signed in and shows a readable page.
     @Test(priority = 910)
     public void browserBackFromWizardKeepsSession() {
-        runCase("B-31", G_WIZARD, "Browser Back from the wizard keeps the client signed in and shows a page",
+        runCase("B-31", G_WIZARD, "The browser's Back button in the onboarding steps keeps the client signed in and shows a page",
                 "Signed in as the edge client, in the wizard press the browser Back button",
                 "A readable portal page (not the login page, not blank)", Who.CLIENT, () -> {
                     openWizard();
                     driver.navigate().back();
-                    Landing l = PageProbe.settle(driver, "browser Back from wizard", 10);
-                    Assert.assertFalse(l.loginForm, "Browser Back logged the client out. " + l.describe());
-                    Assert.assertFalse(l.blank, "Browser Back left a blank page. " + l.describe());
+                    Landing l = PageProbe.settle(driver, "the browser's Back button in the onboarding steps", 10);
+                    Assert.assertFalse(l.loginForm, "The browser's Back button signed the client out. " + l.describe());
+                    Assert.assertFalse(l.blank, "The browser's Back button left an empty page. " + l.describe());
                     return l.describe();
                 });
     }
@@ -1558,7 +1510,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // B-32 - Step 1 is saved (Continue, then Back), the session is ended and the client signs in again: every saved text value must still be there.
     @Test(priority = 920)
     public void savedValuesSurviveSessionEnd() {
-        runCase("B-32", G_WIZARD, "Saved organization values survive ending the session and signing in again",
+        runCase("B-32", G_WIZARD, "Saved organization values survive signing out and signing in again",
                 "Edge client: Continue (saves step 1), Back, read the Organization Details form, end the session (cookies/storage cleared), sign in again, read the form again",
                 "Every saved text value is identical after signing in again (documents are covered by B-37)", Who.NONE, this::ensureOrgStep, () -> {
                     orgPage.clickContinue(); // saves step 1: only saved values can be expected after a new session
@@ -1571,8 +1523,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     String resumed = openWizard();
                     gotoOrgStep();
                     Map<String, String> after = orgValues();
-                    Assert.assertEquals(after, before, "Saved values changed after signing in again (wizard resumed on '" + resumed + "')");
-                    return "Identical after re-login (wizard resumed on '" + resumed + "'): " + before.size() + " values compared";
+                    Assert.assertEquals(after, before, "Saved values changed after signing in again (the onboarding form reopened on the step '" + resumed + "')");
+                    return "All " + before.size() + " saved values are the same after signing in again (the onboarding form reopened on the step '" + resumed + "').";
                 });
     }
 
@@ -1582,7 +1534,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void reviewPageMatchesEnteredData() {
         runCase("B-33", G_WIZARD, "Review page shows exactly what was entered in Organization Details and Points of Contact",
                 "Edge client: valid Organization Details (documents attached) and valid Business/Finance/HR contacts, Continue twice, read the Review page (Confirm is NOT clicked)",
-                "Every value on the Review page equals what was entered; mailing address equals registered address", Who.NONE, this::ensureOrgStep, () -> {
+                "Every value on the Review page should equal what was entered, and the mailing address should equal the registered address", Who.NONE, this::ensureOrgStep, () -> {
                     String orgName = orgPage.prefilledOrganizationName();
                     String shownMobile = orgPage.mobileValue(); // read now: the form is gone after Continue
                     orgPage.clickContinue();
@@ -1602,16 +1554,16 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     cmp(bad, "GST", data.gst, r.organization.get("Tax ID Number (GST Number)"));
                     String regAddr = r.organization.get("Registered Address");
                     if (regAddr == null || !regAddr.contains(data.address) || !regAddr.contains(data.pincode)) {
-                        bad.add("registered address does not contain the entered address/pincode: " + regAddr);
+                        bad.add("the registered address does not contain the address and pincode that were entered: " + regAddr);
                     }
                     if (!java.util.Objects.equals(regAddr, r.organization.get("Mailing Address"))) {
-                        bad.add("mailing address differs although 'same as registered' was ticked: " + r.organization.get("Mailing Address"));
+                        bad.add("the mailing address differs from the registered address although 'same as registered' was ticked: " + r.organization.get("Mailing Address"));
                     }
                     contactCmp(bad, "business", data.business, r.business);
                     contactCmp(bad, "finance", data.finance, r.finance);
                     contactCmp(bad, "hr", data.hr, r.hr);
-                    Assert.assertTrue(bad.isEmpty(), "Review page differs from the entered data:\n - " + String.join("\n - ", bad));
-                    return "Review page matches the entered organization data and the three contacts";
+                    Assert.assertTrue(bad.isEmpty(), "The Review page differs from what was entered:\n - " + String.join("\n - ", bad));
+                    return "The Review page shows exactly what was entered for the organization and for the three contacts.";
                 });
     }
 
@@ -1631,8 +1583,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                         cmp(bad, prefix + " email", shown.get("Email"), pocPage.read(prefix, "email"));
                         cmp(bad, prefix + " phone", shown.get("Contact Number"), pocPage.read(prefix, "contact_no"));
                     }
-                    Assert.assertTrue(bad.isEmpty(), "Contacts were not kept after Back from Review:\n - " + String.join("\n - ", bad));
-                    return "Points of Contact shown with the same values as the Review page";
+                    Assert.assertTrue(bad.isEmpty(), "The contacts were not kept after going Back from the Review page:\n - " + String.join("\n - ", bad));
+                    return "Points of Contact shows the same values as the Review page did.";
                 });
     }
 
@@ -1669,18 +1621,18 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     cmp(bad, "Review: website shows the NEW value", website, r.organization.get("Website"));
                     String regAddr = r.organization.get("Registered Address");
                     if (regAddr == null || !regAddr.contains(address)) {
-                        bad.add("Review: registered address does not show the NEW address '" + address + "' but '" + regAddr + "'");
+                        bad.add("Review: the registered address does not show the NEW address '" + address + "' but '" + regAddr + "'");
                     }
                     if (!java.util.Objects.equals(regAddr, r.organization.get("Mailing Address"))) {
-                        bad.add("Review: mailing address does not follow the registered address although 'same as registered' is ticked: '"
+                        bad.add("Review: the mailing address does not follow the registered address although 'same as registered' is ticked: '"
                                 + r.organization.get("Mailing Address") + "'");
                     }
                     if (!bad.isEmpty()) {
-                        current.defect("Back-and-edit on Organization Details does not behave: " + bad.size() + " problem(s)",
-                                "Values survive Back, and the changed values (not the old ones) are shown on the Review page", String.join("; ", bad));
+                        current.defect("Changing details after going Back does not work correctly: " + bad.size() + " problem(s) on the Organization Details step",
+                                "The values are still there after Back, and the changed values (not the old ones) are shown on the Review page", String.join("; ", bad));
                     }
-                    return bad.isEmpty() ? "Values survived Back and the changed values are on the Review page"
-                            : bad.size() + " problem(s) (see defect)";
+                    return bad.isEmpty() ? "The values were still there after going Back, and the changed values are the ones on the Review page."
+                            : PlainText.count(bad.size(), "problem", "problems") + " found (see the problem listed above).";
                 });
     }
 
@@ -1696,11 +1648,11 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     current.evidence("organization_details_after_back");
                     int shown = orgPage.documentCount();
                     if (shown != 2) {
-                        current.defect("Documents uploaded in step 1 are not shown after Back from step 2",
-                                "Both documents (" + fileName(data.cinDocPath) + ", " + fileName(data.taxDocPath) + ") still attached",
-                                shown + " document(s) shown after Back");
+                        current.defect("The documents uploaded in step 1 are gone after going Back from step 2",
+                                "Both documents (" + fileName(data.cinDocPath) + ", " + fileName(data.taxDocPath) + ") are still attached",
+                                PlainText.count(shown, "document is", "documents are") + " shown after going Back");
                     }
-                    return shown + " document(s) shown after Back";
+                    return PlainText.count(shown, "document is", "documents are") + " shown after going Back.";
                 });
     }
 
@@ -1729,10 +1681,11 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     contactCmp(bad, "business (unchanged)", data.business, r.business);
                     contactCmp(bad, "hr (unchanged)", data.hr, r.hr);
                     if (!bad.isEmpty()) {
-                        current.defect("Back-and-edit on Points of Contact does not behave: " + bad.size() + " problem(s)",
-                                "The changed Finance contact is shown on the Review page; Business and HR stay as entered", String.join("; ", bad));
+                        current.defect("Changing a contact after going Back does not work correctly: " + bad.size() + " problem(s) on the Points of Contact step",
+                                "The changed Finance contact is shown on the Review page; the Business and HR contacts stay as entered", String.join("; ", bad));
                     }
-                    return bad.isEmpty() ? "The changed Finance contact is on the Review page; Business and HR unchanged" : bad.size() + " problem(s) (see defect)";
+                    return bad.isEmpty() ? "The changed Finance contact is on the Review page; the Business and HR contacts are unchanged."
+                            : PlainText.count(bad.size(), "problem", "problems") + " found (see the problem listed above).";
                 });
     }
 
@@ -1748,35 +1701,36 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                 notes.add(c.toString());
             }
         }
-        Assert.assertTrue(bad.isEmpty(), "Server errors / failed calls while browsing: " + bad);
-        return calls.size() + " API call(s), no 5xx" + (notes.isEmpty() ? "" : "; 4xx seen: " + notes);
+        Assert.assertTrue(bad.isEmpty(), "The pages sent requests to the server that failed or ended in a server error: " + bad);
+        return "The pages sent " + PlainText.count(calls.size(), "request", "requests") + " to the server and none of them ended in a server error"
+                + (notes.isEmpty() ? "." : "; the server refused these requests: " + notes + ".");
     }
 
     // X-81 - Browsing the client portal (home, then the wizard) produces no 5xx API answers; the notifications call must answer 200.
     @Test(priority = 970)
     public void clientPortalHasNoServerErrors() {
-        runCase("X-81", G_API, "Browsing the client portal produces no 5xx API responses (incl. notifications)",
+        runCase("X-81", G_API, "Browsing the client portal causes no server errors (including the notifications)",
                 "Signed in as the edge client (" + SecretMasker.maskEmail(data.email) + " / " + SecretMasker.reveal(activePassword)
                         + "): portal home, then the wizard via Continue (read-only), then back to home",
-                "Every API call returns 2xx/3xx; GET .../notifications/push_api/user-notification/ is 200", Who.CLIENT, () -> {
+                "None of the page's requests to the server should fail, and the request for the notifications should succeed", Who.CLIENT, () -> {
                     current.observeApi();
                     PageProbe.open(driver, base() + "/portal", 10);
                     By entry = By.xpath("//button[normalize-space()='Start' or normalize-space()='Continue' or normalize-space()='Continue Setup']");
                     if (!driver.findElements(entry).isEmpty()) {
                         enterWizardFromHome();
-                        PageProbe.settle(driver, "wizard", 8);
+                        PageProbe.settle(driver, "opening the onboarding steps", 8);
                         driver.navigate().back();
-                        PageProbe.settle(driver, "portal", 8);
+                        PageProbe.settle(driver, "going back to the portal", 8);
                     }
                     List<ApiCall> calls = current.observeApi();
                     boolean notif = false;
                     for (ApiCall c : calls) {
                         if (c.url.contains("user-notification")) {
                             notif = true;
-                            Assert.assertTrue(c.status >= 200 && c.status < 300, "Notifications call failed: " + c);
+                            Assert.assertTrue(c.status >= 200 && c.status < 300, "The request for the notifications failed: " + c);
                         }
                     }
-                    return apiCheck(calls) + (notif ? "; notifications call OK" : "; notifications call not seen in this visit");
+                    return apiCheck(calls) + (notif ? " The request for the notifications worked." : " The request for the notifications was not sent during this visit.");
                 });
     }
 
@@ -1789,7 +1743,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         String email = registered ? data.email : ConfigManager.get("login.negative.existing.email", "komp.recon.143733@yopmail.com");
         mustReject("L-09", G_LOGIN, "Existing client, wrong password",
                 "Existing client " + email + " with a wrong password (single attempt)",
-                "Sign-in is refused, the user stays on the login page, and a message explains the problem", data, new String[0], () -> {
+                "The application should refuse the sign-in, keep the user on the login page, and show a message that explains the problem", data, new String[0], () -> {
                     signedOut();
                     return rejectedLogin(email, WRONG);
                 });
@@ -1801,12 +1755,12 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // B-22 - The admin opens /clients by URL: expected the Clients page (known bug: it lands on the dashboard).
     @Test(priority = 1000)
     public void adminSessionSurvivesDeepLink() {
-        runCase("B-22", G_SESSION, "Admin session survives opening a deep link (/clients)",
+        runCase("B-22", G_SESSION, "The admin stays signed in when the /clients address is opened directly",
                 "Signed in as admin, open " + base() + "/clients by URL (full page load)", "The Clients page is shown, not the login page or the dashboard",
                 Who.ADMIN, () -> {
                     Landing l = PageProbe.open(driver, base() + "/clients", 10);
-                    Assert.assertFalse(l.loginForm, "Deep link to /clients logged the admin out. " + l.describe());
-                    Assert.assertTrue(l.path.startsWith("/clients"), "Deep link to /clients landed elsewhere. " + l.describe());
+                    Assert.assertFalse(l.loginForm, "Opening the /clients address directly signed the admin out. " + l.describe());
+                    Assert.assertTrue(l.path.startsWith("/clients"), "Opening the /clients address directly did not show the Clients page: the browser ended up on another page. " + l.describe());
                     return l.describe();
                 });
     }
@@ -1815,7 +1769,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     @Test(priority = 1010)
     public void loginPageWhenAlreadySignedInAdmin() {
         runCase("B-23", G_SESSION, "Signed-in admin opening /login is sent back to the console",
-                "Signed in as admin, open " + base() + "/login", "Redirect to the console (a signed-in user is not shown the login form)", Who.ADMIN, () -> {
+                "Signed in as admin, open " + base() + "/login", "The user should be sent back to the console (a signed-in user must not be shown the login form again)", Who.ADMIN, () -> {
                     Landing l = PageProbe.open(driver, base() + "/login", 8);
                     Assert.assertFalse(l.loginForm, "A signed-in admin is shown the login form again. " + l.describe());
                     return l.describe();
@@ -1829,9 +1783,9 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                 "Signed in as admin, open Clients from the sidebar, press F5", "The Clients page is shown again (not the dashboard / login)", Who.ADMIN, () -> {
                     clientsPage.open();
                     driver.navigate().refresh();
-                    Landing l = PageProbe.settle(driver, "F5 on /clients", 10);
-                    Assert.assertFalse(l.loginForm, "F5 logged the admin out. " + l.describe());
-                    Assert.assertTrue(l.path.startsWith("/clients"), "F5 on /clients lands on " + l.path + " instead of staying on the Clients page. " + l.describe());
+                    Landing l = PageProbe.settle(driver, "pressing F5 on /clients", 10);
+                    Assert.assertFalse(l.loginForm, "Pressing F5 signed the admin out. " + l.describe());
+                    Assert.assertTrue(l.path.startsWith("/clients"), "Pressing F5 on the Clients page led to " + l.path + " instead of staying on the Clients page. " + l.describe());
                     return l.describe();
                 });
     }
@@ -1848,7 +1802,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                 resetList();
                 clientsPage.clickTile("Active");
                 activeClientName = clientsPage.visibleRows().stream().filter(r -> r.status.equalsIgnoreCase("Active")).map(r -> r.company)
-                        .findFirst().orElseThrow(() -> new SkipException("The sandbox has no ACTIVE client (run the happy-flow class first)"));
+                        .findFirst().orElseThrow(() -> new SkipException("There is no ACTIVE client in the test environment (run the happy flow first to create one)"));
                 clientsPage.clickTile("Total");
             }
         }
@@ -1860,24 +1814,24 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void activeClientCannotBeApprovedAgain() {
         runCase("B-40", G_EOR, "An ACTIVE MSA does not offer 'Approve & Activate' again",
                 "Signed in as admin/EOR, MSA & Contract > MSA, search an ACTIVE client, click its status badge (Approve is never clicked)",
-                "The status badge is not actionable, or the dialog offers no 'Approve & Activate'", Who.ADMIN, this::activeClient, () -> {
+                "The ACTIVE status label should not be clickable, or the window that opens should not offer 'Approve & Activate'", Who.ADMIN, this::activeClient, () -> {
                     String client = activeClient();
                     EorMsaPage msa = new EorMsaPage(driver);
                     msa.open();
                     msa.searchClient(client);
-                    Assert.assertEquals(msa.status(client), "ACTIVE", "Precondition: '" + client + "' must be ACTIVE");
+                    Assert.assertEquals(msa.status(client), "ACTIVE", "The test needs the client '" + client + "' to be ACTIVE, but it is not");
                     ToastWatcher.clear(driver);
                     List<WebElement> badge = driver.findElements(By.xpath("//tbody/tr[td[1][normalize-space()=\"" + client + "\"]]/td[5]//button"));
                     if (badge.isEmpty() || !badge.get(0).isEnabled()) {
-                        return "Client '" + client + "': the status badge of the ACTIVE row is not an enabled button: nothing to approve again.";
+                        return "For the client '" + client + "' the ACTIVE status label cannot be clicked, so there is nothing to approve again.";
                     }
                     badge.get(0).click();
                     boolean offered = !driver.findElements(By.xpath("//div[@role='dialog']//button[normalize-space()='Approve & Activate']")).isEmpty();
-                    String dialog = driver.findElements(By.xpath("//div[@role='dialog']")).isEmpty() ? "no dialog"
+                    String dialog = driver.findElements(By.xpath("//div[@role='dialog']")).isEmpty() ? "no window opened"
                             : driver.findElement(By.xpath("//div[@role='dialog']")).getText().replace("\n", " ");
                     driver.findElement(By.tagName("body")).sendKeys(org.openqa.selenium.Keys.ESCAPE); // never approve
-                    Assert.assertFalse(offered, "An already ACTIVE client offers 'Approve & Activate' again. Dialog: " + dialog);
-                    return "Client '" + client + "': badge clicked; dialog: " + dialog;
+                    Assert.assertFalse(offered, "An already ACTIVE client offers 'Approve & Activate' again. The window says: " + dialog);
+                    return "For the client '" + client + "' the status label was clicked. Result: " + dialog + ".";
                 });
     }
 
@@ -1899,8 +1853,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                         Thread.currentThread().interrupt();
                     }
                     String after = msa.status(client) + " / start " + msa.startDate(client);
-                    Assert.assertEquals(after, before, "Refresh changed an ACTIVE MSA ('" + client + "')");
-                    return "Client '" + client + "' | before: " + before + " | after: " + after;
+                    Assert.assertEquals(after, before, "Refreshing the signing status changed the ACTIVE MSA of '" + client + "'");
+                    return "The client '" + client + "' showed '" + before + "' before and '" + after + "' after refreshing the signing status.";
                 });
     }
 
@@ -1974,7 +1928,9 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         for (ClientsPage.Row r : rows) {
             names.add(r.company);
         }
-        return rows.size() + " row(s) " + (names.size() > 3 ? names.subList(0, 3) + "..." : names) + " | " + clientsPage.listSummary();
+        String summary = clientsPage.listSummary();
+        return (rows.isEmpty() ? "No clients are listed" : PlainText.count(rows.size(), "client is", "clients are") + " listed (" + PlainText.some(names, 3) + ")")
+                + (summary == null || summary.isBlank() ? "." : ". The list says: " + summary + ".");
     }
 
     // ================================================================== C1 - Clients search
@@ -1985,7 +1941,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList("X-01", G_SEARCH, "Search by the full company name returns only matching clients");
         runCase("X-01", G_SEARCH, "Search by the full company name returns only matching clients",
                 "Clients > search box = '" + ref.company + "'",
-                "Only rows whose company or POC contains the term; the client is listed; other clients are filtered out", Who.ADMIN, () -> {
+                "Only clients whose company or contact person contains the search text should be listed, including this client", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.searchOnly(ref.company);
                     List<ClientsPage.Row> rows = clientsPage.visibleRows();
@@ -2006,7 +1962,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList("X-02", G_SEARCH, "Search by a partial company name (last characters)");
         String part = ref.company.substring(Math.max(0, ref.company.length() - 8));
         runCase("X-02", G_SEARCH, "Search by a partial company name (last characters)",
-                "Clients > search box = '" + part + "'", "The client is listed; every row matches the fragment", Who.ADMIN, () -> {
+                "Clients > search box = '" + part + "'", "The client should be listed, and every listed client should contain the search text", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.searchOnly(part);
                     List<ClientsPage.Row> rows = clientsPage.visibleRows();
@@ -2023,7 +1979,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void searchByPocName() {
         prepareList("X-03", G_SEARCH, "Search by the point of contact name");
         runCase("X-03", G_SEARCH, "Search by the point of contact name",
-                "Clients > search box = '" + ref.poc + "'", "The client is listed; every row matches the POC name", Who.ADMIN, () -> {
+                "Clients > search box = '" + ref.poc + "'", "The client should be listed, and every listed client should have that contact person", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.searchOnly(ref.poc);
                     List<ClientsPage.Row> rows = clientsPage.visibleRows();
@@ -2066,20 +2022,20 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     // X-06 - A search without a match shows no rows and a readable empty-state message.
     @Test(priority = 1105)
     public void searchWithNoMatchShowsEmptyState() {
-        prepareList("X-06", G_SEARCH, "A search with no match shows an empty-state message");
+        prepareList("X-06", G_SEARCH, "A search with no match shows a 'nothing found' message");
         String term = "zzz-no-such-client-" + System.currentTimeMillis();
-        runCase("X-06", G_SEARCH, "A search with no match shows an empty-state message",
-                "Clients > search box = '" + term + "'", "No client rows and a readable empty-state message (not the full list, not a blank table)", Who.ADMIN, () -> {
+        runCase("X-06", G_SEARCH, "A search with no match shows a 'nothing found' message",
+                "Clients > search box = '" + term + "'", "No clients should be listed and a readable message should say so (not the full list, not an empty table)", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.searchOnly(term);
                     List<ClientsPage.Row> rows = clientsPage.visibleRows();
-                    Assert.assertTrue(rows.isEmpty(), "A no-match search still lists clients. " + rowsSummary(rows));
+                    Assert.assertTrue(rows.isEmpty(), "A search without a match still lists clients. " + rowsSummary(rows));
                     String empty = clientsPage.emptyStateText();
                     if (empty.isEmpty() || empty.startsWith("(table body is empty)")) {
-                        current.defect("No empty-state message for a search without results", "A message such as 'No clients found'",
-                                "Table body text: '" + empty + "' | " + clientsPage.listSummary());
+                        current.defect("The list shows no message when a search finds nothing", "A message such as 'No clients found'",
+                                "The list is empty and shows this text: '" + empty + "'. The list says: " + clientsPage.listSummary());
                     }
-                    return "0 rows; empty-state text: '" + empty.replace("\n", " ") + "'";
+                    return "No clients are listed. The page says: '" + empty.replace("\n", " ") + "'.";
                 });
     }
 
@@ -2098,7 +2054,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList(id, G_SEARCH, "Search text '" + shown + "' is handled safely");
         runCase(id, G_SEARCH, "Search text '" + shown + "' is handled safely",
                 "Clients > search box = '" + shown + "'",
-                "No script runs, no server error (5xx), the list shows no match or only matching rows, the page stays usable", Who.ADMIN, () -> {
+                "The search text should be treated as plain text: nothing runs, no server error appears, the list shows no match or only matching rows, and the page keeps working", Who.ADMIN, () -> {
                     resetList();
                     current.observeApi();
                     clientsPage.searchOnly(term);
@@ -2106,11 +2062,11 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     assertNoAlert();
                     List<ApiCall> calls = current.observeApi();
                     for (ApiCall c : calls) {
-                        Assert.assertFalse(c.isServerError() || c.error != null, "Server error while searching: " + c);
+                        Assert.assertFalse(c.isServerError() || c.error != null, "A server error occurred while searching: " + c);
                     }
                     Assert.assertTrue(driver.findElement(By.xpath("//input[@placeholder='Search by company or POC name']")).isDisplayed(),
                             "The search box disappeared (page broke)");
-                    return rowsSummary(rows) + " | API calls: " + calls.size();
+                    return rowsSummary(rows) + " The page sent " + PlainText.count(calls.size(), "request", "requests") + " to the server and none of them ended in a server error.";
                 });
     }
 
@@ -2119,7 +2075,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void clearingSearchRestoresTheList() {
         prepareList("X-13", G_SEARCH, "Clearing the search restores the full list");
         runCase("X-13", G_SEARCH, "Clearing the search restores the full list",
-                "Search for a client, then clear the search box", "The same number of rows and the same 'Showing ... of N' total as before searching", Who.ADMIN, () -> {
+                "Search for a client, then clear the search box", "The same clients and the same total as before the search should be shown again", Who.ADMIN, () -> {
                     resetList();
                     String before = clientsPage.listSummary();
                     clientsPage.searchOnly(ref.company);
@@ -2151,7 +2107,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         if (want == 0) {
             Assert.assertFalse(clientsPage.emptyStateText().isEmpty(), "A filter without results shows no message");
         }
-        return "trigger '" + text + "' | expected " + want + " | " + rowsSummary(rows);
+        return "Filter chosen: '" + text + "'. The list should hold " + PlainText.count((int) want, "client", "clients") + ". " + rowsSummary(rows);
     }
 
     // X-20 - Country filter = India lists exactly the India clients (the count is compared with the full list).
@@ -2159,25 +2115,25 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void countryIndia() {
         prepareList("X-20", G_FILTER, "Country filter = India lists exactly the India clients");
         runCase("X-20", G_FILTER, "Country filter = India lists exactly the India clients", "Clients > Country > tick 'India'",
-                "Every row has Country India and 'of N' equals the number of India clients in the full list", Who.ADMIN,
+                "Every listed client should be in India, and the total in 'Showing ... of N' should equal the number of India clients in the full list", Who.ADMIN,
                 () -> filterCase("Country", r -> r.country.equals("India"), "India"));
     }
 
     // X-21 - Country filter = Brazil lists exactly the Brazil clients, or shows the empty state.
     @Test(priority = 1211)
     public void countryBrazil() {
-        prepareList("X-21", G_FILTER, "Country filter = Brazil lists exactly the Brazil clients (or the empty state)");
-        runCase("X-21", G_FILTER, "Country filter = Brazil lists exactly the Brazil clients (or the empty state)", "Clients > Country > tick 'Brazil'",
-                "Every row has Country Brazil, 'of N' equals their number; with none, 'No clients found' is shown", Who.ADMIN,
+        prepareList("X-21", G_FILTER, "Country filter = Brazil lists exactly the Brazil clients (or a 'no clients' message)");
+        runCase("X-21", G_FILTER, "Country filter = Brazil lists exactly the Brazil clients (or a 'no clients' message)", "Clients > Country > tick 'Brazil'",
+                "Every listed client should be in Brazil and the total in 'Showing ... of N' should equal their number; with none, the message 'No clients found' should be shown", Who.ADMIN,
                 () -> filterCase("Country", r -> r.country.equals("Brazil"), "Brazil"));
     }
 
     // X-22 - Country filter = United States, same check.
     @Test(priority = 1212)
     public void countryUnitedStates() {
-        prepareList("X-22", G_FILTER, "Country filter = United States lists exactly the US clients (or the empty state)");
-        runCase("X-22", G_FILTER, "Country filter = United States lists exactly the US clients (or the empty state)", "Clients > Country > tick 'United States'",
-                "Every row has Country United States, 'of N' equals their number; with none, 'No clients found' is shown", Who.ADMIN,
+        prepareList("X-22", G_FILTER, "Country filter = United States lists exactly the US clients (or a 'no clients' message)");
+        runCase("X-22", G_FILTER, "Country filter = United States lists exactly the US clients (or a 'no clients' message)", "Clients > Country > tick 'United States'",
+                "Every listed client should be in the United States and the total in 'Showing ... of N' should equal their number; with none, the message 'No clients found' should be shown", Who.ADMIN,
                 () -> filterCase("Country", r -> r.country.equals("United States"), "United States"));
     }
 
@@ -2186,7 +2142,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void clientTypeAor() {
         prepareList("X-23", G_FILTER, "Client Type filter = AOR lists exactly the AOR clients");
         runCase("X-23", G_FILTER, "Client Type filter = AOR lists exactly the AOR clients", "Clients > Client Type > tick 'AOR'",
-                "Every row is AOR and 'of N' equals the number of AOR clients in the full list", Who.ADMIN,
+                "Every listed client should be an AOR client, and the total in 'Showing ... of N' should equal the number of AOR clients in the full list", Who.ADMIN,
                 () -> filterCase("Client Type", r -> r.type.equals("AOR"), "AOR"));
     }
 
@@ -2195,7 +2151,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void clientTypeEor() {
         prepareList("X-24", G_FILTER, "Client Type filter = EOR lists exactly the EOR clients");
         runCase("X-24", G_FILTER, "Client Type filter = EOR lists exactly the EOR clients", "Clients > Client Type > tick 'EOR'",
-                "Every row is EOR and 'of N' equals the number of EOR clients in the full list", Who.ADMIN,
+                "Every listed client should be an EOR client, and the total in 'Showing ... of N' should equal the number of EOR clients in the full list", Who.ADMIN,
                 () -> filterCase("Client Type", r -> r.type.equals("EOR"), "EOR"));
     }
 
@@ -2204,7 +2160,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void countryMultiSelect() {
         prepareList("X-25", G_FILTER, "Country filter accepts several countries (India + Brazil)");
         runCase("X-25", G_FILTER, "Country filter accepts several countries (India + Brazil)", "Clients > Country > tick 'India' and 'Brazil'",
-                "Rows from either country; 'of N' equals the number of India + Brazil clients", Who.ADMIN,
+                "Clients from either country should be listed, and the total in 'Showing ... of N' should equal the number of India + Brazil clients", Who.ADMIN,
                 () -> filterCase("Country", r -> r.country.equals("India") || r.country.equals("Brazil"), "India", "Brazil"));
     }
 
@@ -2213,7 +2169,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void countryAndTypeCombined() {
         prepareList("X-26", G_FILTER, "Country and Client Type filters combine (India AND AOR)");
         runCase("X-26", G_FILTER, "Country and Client Type filters combine (India AND AOR)", "Clients > Country 'India' + Client Type 'AOR'",
-                "Only clients that are India AND AOR; 'of N' equals their number", Who.ADMIN, () -> {
+                "Only clients that are in India AND are AOR clients should be listed, and the total should equal their number", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.selectFilter("Country", "India");
                     clientsPage.selectFilter("Client Type", "AOR");
@@ -2224,7 +2180,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                         Assert.assertTrue(r.country.equals("India") && r.type.equals("AOR"), "Row outside India AND AOR: " + r);
                     }
                     Assert.assertEquals(shown, want, "Combined filters list " + shown + " client(s) but " + want + " match. " + rowsSummary(rows));
-                    return "expected " + want + " | " + rowsSummary(rows);
+                    return "The list should hold " + PlainText.count((int) want, "client", "clients") + ". " + rowsSummary(rows);
                 });
     }
 
@@ -2233,7 +2189,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void filterOptionsCanBeSearched() {
         prepareList("X-27", G_FILTER, "The search field inside the Country filter narrows its options");
         runCase("X-27", G_FILTER, "The search field inside the Country filter narrows its options",
-                "Clients > Country > type 'bra', then 'brazzz'", "'bra' shows only Brazil; a term without match shows 'No results.'", Who.ADMIN, () -> {
+                "Clients > Country > type 'bra', then 'brazzz'", "Typing 'bra' should offer only Brazil; a text without a match should show 'No results.'", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.openFilter("Country");
                     clientsPage.searchInFilter("bra");
@@ -2245,7 +2201,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     clientsPage.closePopover();
                     Assert.assertTrue(none.isEmpty(), "Options shown for a term without match: " + none);
                     Assert.assertFalse(popover.isEmpty(), "Empty popover without any message");
-                    return "'bra' -> " + options + " | 'zzzz' -> " + none + " | popover text: '" + popover + "'";
+                    return "Typing 'bra' offers: " + options + ". Typing 'zzzz' offers: " + (none.isEmpty() ? "nothing" : none.toString()) + "; the box says: '" + popover + "'.";
                 });
     }
 
@@ -2256,20 +2212,20 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         String other = ref.type.equals("EOR") ? "AOR" : "EOR";
         runCase("X-28", G_FILTER, "A filter and the search box combine (AND)",
                 "Client Type '" + other + "' + search '" + ref.company + "' (the client is " + ref.type + "), then Client Type '" + ref.type + "' + the same search",
-                "With the other type: no rows and an empty-state message; with its own type: the client is listed", Who.ADMIN, () -> {
+                "With the other client type no clients should be listed and a message should say so; with its own client type the client should be listed", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.selectFilter("Client Type", other);
                     clientsPage.searchOnly(ref.company);
                     List<ClientsPage.Row> none = clientsPage.visibleRows();
                     String empty = clientsPage.emptyStateText();
                     Assert.assertTrue(none.isEmpty(), "Filter " + other + " + search for a " + ref.type + " client still lists rows: " + rowsSummary(none));
-                    Assert.assertFalse(empty.isEmpty(), "No empty-state message when filter and search exclude every client");
+                    Assert.assertFalse(empty.isEmpty(), "No 'nothing found' message is shown when the filter and the search exclude every client");
                     resetList();
                     clientsPage.selectFilter("Client Type", ref.type);
                     clientsPage.searchOnly(ref.company);
                     List<ClientsPage.Row> rows = clientsPage.visibleRows();
                     Assert.assertTrue(rows.stream().anyMatch(r -> r.company.equals(ref.company)), "Filter " + ref.type + " + search lost the client. " + rowsSummary(rows));
-                    return "other type: 0 rows ('" + empty.replace("\n", " ") + "') | own type: " + rowsSummary(rows);
+                    return "With the other client type no clients are listed and the page says: '" + empty.replace("\n", " ") + "'. With its own client type: " + rowsSummary(rows);
                 });
     }
 
@@ -2279,7 +2235,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList("X-29", G_FILTER, "'Clear all' resets the Country and Client Type filters");
         runCase("X-29", G_FILTER, "'Clear all' resets the Country and Client Type filters",
                 "Clients > Country 'India' + Client Type 'AOR', then click 'Clear all'",
-                "Both filters read 'Any' again and the full list ('of N' = all clients) is shown", Who.ADMIN, () -> {
+                "Both filters should read 'Any' again and the full list of clients should be shown", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.selectFilter("Country", "India");
                     clientsPage.selectFilter("Client Type", "AOR");
@@ -2289,7 +2245,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     Assert.assertTrue(clientsPage.filterText("Country").endsWith("Any"), "Country still filtered: " + clientsPage.filterText("Country"));
                     Assert.assertTrue(clientsPage.filterText("Client Type").endsWith("Any"), "Client Type still filtered: " + clientsPage.filterText("Client Type"));
                     Assert.assertEquals(clientsPage.totalFromSummary(), total, "List is not back to all clients after 'Clear all'");
-                    return "Filters: " + clientsPage.filterText("Country") + " / " + clientsPage.filterText("Client Type") + " | " + rowsSummary(rows);
+                    return "After 'Clear all' the filters read: " + clientsPage.filterText("Country") + " / " + clientsPage.filterText("Client Type") + ". " + rowsSummary(rows);
                 });
     }
 
@@ -2303,7 +2259,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void statusTileFiltersTheList(String id, String tile) {
         prepareList(id, G_FILTER, "Status tile '" + tile + "' filters the list by status");
         runCase(id, G_FILTER, "Status tile '" + tile + "' filters the list by status", "Clients > click the '" + tile + "' tile",
-                "Only rows with that status; 'of N' equals the number of such clients; no clients -> 'No clients found'", Who.ADMIN, () -> {
+                "Only clients with that status should be listed, the total in 'Showing ... of N' should equal the number of such clients, and with none the message 'No clients found' should be shown", Who.ADMIN, () -> {
                     resetList();
                     int tileValue = clientsPage.tileValue(tile);
                     clientsPage.clickTile(tile);
@@ -2319,10 +2275,10 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                         Assert.assertFalse(clientsPage.emptyStateText().isEmpty(), "No message for a status without clients");
                     }
                     if (tileValue != want) {
-                        current.defect("The '" + tile + "' tile number differs from the clients that have this status", "Tile = " + want,
-                                "Tile shows " + tileValue + " but " + want + " clients have the status");
+                        current.defect("The number on the '" + tile + "' tile does not match the number of clients with that status", "The tile shows " + want,
+                                "The tile shows " + tileValue + " but " + want + " clients have that status");
                     }
-                    return "tile " + tileValue + " | expected " + want + " | " + rowsSummary(rows);
+                    return "The '" + tile + "' tile shows " + tileValue + ". The list should hold " + PlainText.count((int) want, "client", "clients") + ". " + rowsSummary(rows);
                 });
     }
 
@@ -2331,7 +2287,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void filterStaysAcrossPages() {
         prepareList("X-34", G_FILTER, "A filter stays applied on page 2");
         runCase("X-34", G_FILTER, "A filter stays applied on page 2", "Clients > Country 'India', then page 2",
-                "Page 2 shows only India clients and 'Showing 11-20 of N'", Who.ADMIN, () -> {
+                "Page 2 should show only India clients and the text 'Showing 11-20 of N'", Who.ADMIN, () -> {
                     resetList();
                     clientsPage.selectFilter("Country", "India");
                     clientsPage.visibleRows();
@@ -2355,7 +2311,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void applyingAFilterReturnsToPageOne() {
         prepareList("X-35", G_FILTER, "Applying a filter while on page 2 returns to page 1");
         runCase("X-35", G_FILTER, "Applying a filter while on page 2 returns to page 1",
-                "Clients > page 2, then Client Type 'AOR' (few clients)", "The first page of the AOR clients is shown ('Showing 1-...'), not an empty page 2", Who.ADMIN, () -> {
+                "Clients > page 2, then Client Type 'AOR' (few clients)", "The first page of the AOR clients should be shown ('Showing 1-...'), not an empty page 2", Who.ADMIN, () -> {
                     resetList();
                     if (total <= 10) {
                         throw new SkipException("Fewer than 11 clients: no page 2");
@@ -2405,7 +2361,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void secondPageShowsDifferentClients() {
         prepareList("X-40", G_TABLE, "Page 2 shows different clients than page 1");
         runCase("X-40", G_TABLE, "Page 2 shows different clients than page 1", "Clients > click page '2' of the pagination",
-                "Different rows, and the 'Showing' text moves to 'Showing 11-20 of N'", Who.ADMIN, () -> {
+                "Different clients should be listed, and the text should change to 'Showing 11-20 of N'", Who.ADMIN, () -> {
                     resetList();
                     if (total <= 10) {
                         throw new SkipException("Fewer than 11 clients: no page 2");
@@ -2454,7 +2410,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList("X-47", G_TABLE, "Previous / Next buttons are enabled only where there is a page to go to");
         runCase("X-47", G_TABLE, "Previous / Next buttons are enabled only where there is a page to go to",
                 "Clients (10 per page): check Previous on page 1, click Next to the last page, check Next, click Previous",
-                "Previous is disabled on page 1; Next is disabled on the last page ('Showing ...-N of N'); Previous goes back one page", Who.ADMIN, () -> {
+                "Previous should be disabled on page 1, Next should be disabled on the last page, and Previous should go back one page", Who.ADMIN, () -> {
                     resetList();
                     if (total <= 10) {
                         throw new SkipException("Only one page of clients");
@@ -2474,17 +2430,17 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     Assert.assertTrue(last.contains("Showing " + start) && last.contains("of " + total), "Last page summary is '" + last + "'");
                     clientsPage.clickPrevious();
                     clientsPage.visibleRows();
-                    return "Last page: " + last + " | after Previous: " + clientsPage.listSummary();
+                    return "On the last page the list says: " + last + "; after clicking Previous it says: " + clientsPage.listSummary() + ".";
                 });
     }
 
     // X-48 - The tile numbers equal the clients with that status (known bug: "Pending" clients have no tile, so the tiles do not add up to Total).
     @Test(priority = 1303)
     public void tilesMatchTheClientList() {
-        prepareList("X-48", G_TABLE, "Stat tiles (Total / Active / Inactive / In-Progress) match the clients in the list");
-        runCase("X-48", G_TABLE, "Stat tiles (Total / Active / Inactive / In-Progress) match the clients in the list",
+        prepareList("X-48", G_TABLE, "Summary tiles (Total / Active / Inactive / In-Progress) match the clients in the list");
+        runCase("X-48", G_TABLE, "Summary tiles (Total / Active / Inactive / In-Progress) match the clients in the list",
                 "Clients > read the four tiles and compare them with all clients (50 per page)",
-                "Total = number of clients; each tile = number of clients with that status; the tiles add up to Total", Who.ADMIN, () -> {
+                "The Total tile should equal the number of clients, each other tile should equal the number of clients with that status, and the tiles should add up to Total", Who.ADMIN, () -> {
                     resetList();
                     int tTotal = clientsPage.tileValue("Total");
                     int tActive = clientsPage.tileValue("Active");
@@ -2494,15 +2450,15 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     long cInactive = count(r -> r.status.equalsIgnoreCase("Inactive"));
                     long cProgress = count(r -> r.status.equalsIgnoreCase("In-Progress"));
                     long cOther = total - cActive - cInactive - cProgress;
-                    String facts = "tiles Total " + tTotal + " / Active " + tActive + " / Inactive " + tInactive + " / In-Progress " + tProgress
-                            + " | clients " + total + ": Active " + cActive + ", Inactive " + cInactive + ", In-Progress " + cProgress
-                            + ", other (Pending) " + cOther;
-                    Assert.assertEquals(tTotal, total, "Total tile differs from the number of clients. " + facts);
-                    Assert.assertEquals(tActive, cActive, "Active tile differs from the list. " + facts);
-                    Assert.assertEquals(tInactive, cInactive, "Inactive tile differs from the list. " + facts);
-                    Assert.assertEquals(tProgress, cProgress, "In-Progress tile differs from the list. " + facts);
+                    String facts = "The tiles show: Total " + tTotal + ", Active " + tActive + ", Inactive " + tInactive + ", In-Progress " + tProgress
+                            + ". The list holds " + total + " clients: Active " + cActive + ", Inactive " + cInactive + ", In-Progress " + cProgress
+                            + ", other (Pending) " + cOther + ".";
+                    Assert.assertEquals(tTotal, total, "The Total tile differs from the number of clients. " + facts);
+                    Assert.assertEquals(tActive, cActive, "The Active tile differs from the list. " + facts);
+                    Assert.assertEquals(tInactive, cInactive, "The Inactive tile differs from the list. " + facts);
+                    Assert.assertEquals(tProgress, cProgress, "The In-Progress tile differs from the list. " + facts);
                     if (tActive + tInactive + tProgress != tTotal) {
-                        current.defect("Stat tiles do not add up to Total: clients with status 'Pending' have no tile",
+                        current.defect("The summary tiles do not add up to the total: clients with the status 'Pending' have no tile",
                                 "Tiles that account for every client (or a 'Pending' tile)", facts);
                     }
                     return facts;
@@ -2526,7 +2482,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList(id, G_TABLE, "Sorting by '" + header + "': ascending, descending, then back to the default order");
         runCase(id, G_TABLE, "Sorting by '" + header + "': ascending, descending, then back to the default order",
                 "Clients > click the '" + header + "' header three times (10 per page)",
-                "1st click ascending, 2nd descending, 3rd the original order", Who.ADMIN, () -> {
+                "The 1st click sorts A to Z, the 2nd click sorts Z to A, the 3rd click brings back the original order", Who.ADMIN, () -> {
                     resetList();
                     List<String> original = keys(clientsPage.visibleRows(), key);
                     clientsPage.sortBy(header);
@@ -2539,7 +2495,8 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     clientsPage.sortBy(header);
                     List<String> back = keys(clientsPage.visibleRows(), key);
                     Assert.assertEquals(back, original, "The third click does not restore the default order");
-                    return "asc " + asc.subList(0, Math.min(3, asc.size())) + " | desc " + desc.subList(0, Math.min(3, desc.size())) + " | default restored";
+                    return "After the 1st click the first names are " + asc.subList(0, Math.min(3, asc.size())) + " (A to Z); after the 2nd click " + desc.subList(0, Math.min(3, desc.size()))
+                            + " (Z to A); after the 3rd click the original order is back.";
                 });
     }
 
@@ -2549,7 +2506,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
         prepareList("X-55", G_TABLE, "Sorting by Company orders ALL clients, not only the 10 rows of the current page");
         runCase("X-55", G_TABLE, "Sorting by Company orders ALL clients, not only the 10 rows of the current page",
                 "Clients (10 per page) > click the 'Company' header once and compare page 1 with the first 10 of ALL companies sorted",
-                "Page 1 holds the 10 alphabetically first companies of the whole list", Who.ADMIN, () -> {
+                "Page 1 should show the 10 companies that come first alphabetically in the whole list", Who.ADMIN, () -> {
                     resetList();
                     if (total <= 10) {
                         throw new SkipException("Only one page of clients");
@@ -2564,7 +2521,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                         List<String> globalSorted = new ArrayList<>(all);
                         globalSorted.sort(c);
                         if (page1.equals(globalSorted.subList(0, 10))) {
-                            return "Page 1 equals the first 10 of all " + total + " companies sorted: " + page1.subList(0, 3) + "...";
+                            return "Page 1 shows the first 10 of all " + total + " companies in alphabetical order (starting with " + page1.subList(0, 3) + ").";
                         }
                         globalFacts.add(globalSorted.subList(0, 3).toString());
                     }
@@ -2572,14 +2529,14 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                         List<String> localSorted = new ArrayList<>(defaultFirst10);
                         localSorted.sort(c);
                         if (page1.equals(localSorted)) {
-                            current.defect("Column sort only reorders the 10 rows of the current page, not all clients",
-                                    "Page 1 shows the alphabetically first 10 of all " + total + " companies (e.g. " + globalFacts.get(0) + ")",
-                                    "Page 1 shows " + page1.subList(0, 3) + "... = the previously visible 10 rows sorted among themselves");
-                            return "Page-local sort: page 1 = the default first 10 rows re-ordered: " + page1;
+                            current.defect("Sorting a column only re-orders the 10 clients on the current page, not all clients",
+                                    "Page 1 shows the 10 companies that come first alphabetically among all " + total + " (for example " + globalFacts.get(0) + ")",
+                                    "Page 1 shows " + page1.subList(0, 3) + " and so on: the same 10 clients that were visible before, only sorted among themselves");
+                            return "Page 1 only shows the same 10 clients as before, re-ordered: " + page1 + ". It should show the 10 companies that come first in the whole list.";
                         }
                     }
-                    Assert.fail("Page 1 after sorting matches neither a global nor a page-local ordering: " + page1
-                            + " | global first rows under the tried orderings: " + globalFacts);
+                    Assert.fail("After sorting, page 1 shows " + page1 + ", which is neither the first 10 of the whole list nor the same 10 clients re-ordered. "
+                            + "The first rows of the whole list would be: " + globalFacts);
                     return "";
                 });
     }
@@ -2595,7 +2552,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void columnCanBeHiddenAndShown(String id, String column) {
         prepareList(id, G_TABLE, "Columns menu: hide and show the '" + column + "' column");
         runCase(id, G_TABLE, "Columns menu: hide and show the '" + column + "' column", "Clients > Columns > untick '" + column + "', then tick it again",
-                "The column header and the cells disappear, then come back; the other columns are untouched", Who.ADMIN, () -> {
+                "The column heading and its cells should disappear and then come back, and the other columns should stay as they are", Who.ADMIN, () -> {
                     resetList();
                     List<String> before = clientsPage.headerTexts();
                     int cellsBefore = clientsPage.firstRowCellCount();
@@ -2614,7 +2571,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     List<String> shown = clientsPage.headerTexts();
                     Assert.assertEquals(shown, before, "Headers after showing the column again");
                     Assert.assertEquals(clientsPage.firstRowCellCount(), cellsBefore, "Cells after showing the column again");
-                    return "Hidden and restored; headers " + shown;
+                    return "The column was hidden and shown again. The column headings are now: " + shown + ".";
                 });
     }
 
@@ -2690,7 +2647,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     for (String r : rows) {
                         Assert.assertTrue(r.toLowerCase(Locale.ROOT).contains(name.toLowerCase(Locale.ROOT)), "MSA list shows a non-matching client: " + r);
                     }
-                    return "Search '" + name + "': " + rows.size() + " row(s): " + rows;
+                    return "Searching for '" + name + "' lists " + PlainText.count(rows.size(), "row", "rows") + ": " + rows + ".";
                 });
     }
 
@@ -2699,17 +2656,17 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     public void msaSearchNoMatch() {
         String term = "zzz-no-such-client-" + System.currentTimeMillis();
         runCase("X-71", G_MSA, "MSA & Contract search with no match shows no rows and a message",
-                "MSA & Contract > MSA, search box = '" + term + "'", "No rows and a readable empty-state message", Who.ADMIN, () -> {
+                "MSA & Contract > MSA, search box = '" + term + "'", "No rows should be listed and a readable message should say so", Who.ADMIN, () -> {
                     new EorMsaPage(driver).open();
                     msaSearch(term);
                     List<String> rows = msaRows();
-                    Assert.assertTrue(rows.isEmpty(), "A no-match MSA search still lists rows: " + rows);
+                    Assert.assertTrue(rows.isEmpty(), "A search without a match still lists rows in the MSA list: " + rows);
                     String body = driver.findElement(By.tagName("body")).getText().toLowerCase(Locale.ROOT);
                     if (!body.matches("(?s).*(no (results|clients|msa|data|records)|nothing|not found|no match).*")) {
-                        current.defect("No empty-state message for an MSA search without results", "A message such as 'No MSAs found'",
-                                "Page text contains no empty-state wording");
+                        current.defect("The MSA list shows no message when a search finds nothing", "A message such as 'No MSAs found'",
+                                "The page shows no text that says nothing was found");
                     }
-                    return "0 rows";
+                    return "No rows are listed.";
                 });
     }
 
@@ -2717,7 +2674,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
     @Test(priority = 1422)
     public void msaSearchSpecialCharacters() {
         runCase("X-72", G_MSA, "MSA search text '<script>alert(1)</script>' is handled safely",
-                "MSA & Contract > MSA, search box = '<script>alert(1)</script>'", "No script runs, no server error, no match or only matching rows", Who.ADMIN, () -> {
+                "MSA & Contract > MSA, search box = '<script>alert(1)</script>'", "The search text should be treated as plain text: nothing runs, no server error appears, and the list shows no match or only matching rows", Who.ADMIN, () -> {
                     new EorMsaPage(driver).open();
                     current.observeApi();
                     msaSearch("<script>alert(1)</script>");
@@ -2725,27 +2682,28 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     assertNoAlert();
                     List<ApiCall> calls = current.observeApi();
                     for (ApiCall c : calls) {
-                        Assert.assertFalse(c.isServerError() || c.error != null, "Server error while searching the MSA list: " + c);
+                        Assert.assertFalse(c.isServerError() || c.error != null, "A server error occurred while searching the MSA list: " + c);
                     }
-                    return rows.size() + " row(s) | API calls: " + calls.size();
+                    return PlainText.count(rows.size(), "row is", "rows are") + " listed. The page sent " + PlainText.count(calls.size(), "request", "requests")
+                            + " to the server and none of them ended in a server error.";
                 });
     }
 
     // X-80 - Browsing the admin console (Dashboard, Clients, MSA, Candidates, Appraisal) produces no 5xx API answers.
     @Test(priority = 1430)
     public void adminBrowsingHasNoServerErrors() {
-        runCase("X-80", G_API, "Browsing the admin console produces no 5xx API responses",
+        runCase("X-80", G_API, "Browsing the admin console causes no server errors",
                 "Signed in as admin: Dashboard, Clients, MSA & Contract > MSA, Candidates, Appraisal (read-only)",
-                "Every API call returns 2xx/3xx (no 500/502/503, no failed requests)", Who.ADMIN, () -> {
+                "None of the page's requests to the server should fail or end in a server error", Who.ADMIN, () -> {
                     current.observeApi();
                     PageProbe.open(driver, base() + "/", 10);
                     clientsPage.open();
                     clientsPage.visibleRows();
                     new EorMsaPage(driver).open();
                     driver.findElement(By.xpath("//a[@href='/candidates']")).click();
-                    PageProbe.settle(driver, "candidates", 8);
+                    PageProbe.settle(driver, "opening the Candidates page", 8);
                     driver.findElement(By.xpath("//a[@href='/appraisal']")).click();
-                    PageProbe.settle(driver, "appraisal", 8);
+                    PageProbe.settle(driver, "opening the Appraisal page", 8);
                     return apiCheck(current.observeApi());
                 });
     }
@@ -2764,7 +2722,7 @@ public class ClientOnboardingEdgeCases extends BaseTest {
                     }
                     session = Who.NONE;
                     driver.navigate().back();
-                    Landing l = PageProbe.settle(driver, "browser Back after sign out", 8);
+                    Landing l = PageProbe.settle(driver, "the browser's Back button after signing out", 8);
                     Assert.assertFalse(l.adminContent, "Protected admin content is shown after sign out + Back. " + l.describe());
                     return l.describe();
                 });

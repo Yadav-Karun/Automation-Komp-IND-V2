@@ -1,0 +1,13 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- PROJECT MANAGEMENT - HAPPY FLOW (Regression Testing - Project Creation, positive path only). One test class = one report folder named after the class.
+     Two cases: TC-PRJ-01 creates an AOR project, TC-PRJ-02 creates an EOR project, each for an EXISTING client (no client is created).
+     Run:  mvn clean test -Dsuite=testng-project-happy-flow.xml
+     One case only:  add -Dcases=TC-PRJ-01   (or TC-PRJ-02)
+     Fixed random choices:  -Dproject.seed=<n>      Fixed client:  -Dproject.client="Bleach" -->
+<suite name="KOMP IND Testing - Project Management" verbose="1" parallel="none">
+    <test name="Regression Testing - Project Creation (happy flow)">
+        <classes>
+            <class name="tests.project.ProjectCreationHappyFlow"/>
+        </classes>
+    </test>
+</suite>

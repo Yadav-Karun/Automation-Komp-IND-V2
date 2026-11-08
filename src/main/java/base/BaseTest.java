@@ -29,6 +29,7 @@ import utils.ConfigManager;
 import utils.Connectivity;
 import utils.FormFeedback.Outcome;
 import utils.Log;
+import utils.PlainText;
 import utils.TestDataGenerator;
 
 /**
@@ -51,8 +52,9 @@ public abstract class BaseTest {
         try {
             ConfigManager.env(); // fail fast on a bad / production environment
             DriverFactory.cleanOldProfiles();
-            ExecutionInfo.begin(getClass().getSimpleName(), context.getName());
+            ExecutionInfo.begin(getClass().getSimpleName(), context.getName(), module());
             ResultCollector.reset();
+            PlainText.resetWordingNotes();
             Log.init(ExecutionInfo.logs().resolve("execution.log"));
             ExtentManager.get();
             Log.info("Report folder " + ExecutionInfo.id() + " | env=" + ConfigManager.env() + " | " + ConfigManager.baseUrl());
@@ -66,6 +68,20 @@ public abstract class BaseTest {
             driver = null;
             throw e;
         }
+    }
+
+    /**
+     * The module of the test class, taken from its package (tests.client -> Client-Onboarding, tests.project -> Project-Management, ...): it is the first tag
+     * of every case in the report. Every module has its own folder under tests/.
+     */
+    protected String module() {
+        String pkg = getClass().getPackageName();
+        String last = pkg.substring(pkg.lastIndexOf('.') + 1);
+        return switch (last) {
+            case "client" -> ExecutionInfo.MODULE_CLIENT;
+            case "project" -> "Project-Management";
+            default -> last.isEmpty() ? ExecutionInfo.MODULE_CLIENT : Character.toUpperCase(last.charAt(0)) + last.substring(1);
+        };
     }
 
     /** Hook: a browser was started (or restarted). Create page objects here; sessions of an earlier browser are gone. */
@@ -164,6 +180,12 @@ public abstract class BaseTest {
                 + " FAILED (each failure is an application defect or a failed check: see the report) | " + skip + " skipped");
         Log.info("HTML report : " + ExecutionInfo.reportFile().toAbsolutePath());
         Log.info("Screenshots : " + ExecutionInfo.screenshots().toAbsolutePath());
+        List<String> wording = PlainText.wordingNotes();
+        if (!wording.isEmpty()) {
+            // the reports are read by non-technical people: these sentences used technical words and were translated automatically
+            Log.warn("Report wording: " + wording.size() + " sentence(s) used technical words (translated automatically in the report) - reword them at the source:");
+            wording.stream().limit(15).forEach(w -> Log.warn("   - " + w));
+        }
         if (ExcelReportWriter.excelEnabled()) {
             Log.info("Excel report: " + ExecutionInfo.root().resolve(ExecutionInfo.excelFileName()).toAbsolutePath());
         }
@@ -218,16 +240,18 @@ public abstract class BaseTest {
         rep.phase(slug(id), title, expected, () -> {
             Outcome o = attempt.call();
             if (o.accepted) {
-                throw new AssertionError("Application ACCEPTED input that should be rejected. " + o.describe());
+                String shown = o.quotedTexts();
+                throw new AssertionError("The application accepted an entry that it should have refused: it moved on"
+                        + (shown.isEmpty() ? " and showed no message." : " and showed: " + shown + "."));
             }
             if (!o.hasFeedback()) {
-                rep.defect("Input rejected silently: no validation message was shown",
-                        "A visible message that explains what is wrong", o.describe());
+                rep.defect("The application refused the entry but did not say why: no message was shown to the user",
+                        "A clear message that tells the user what is wrong", o.describe());
             } else {
-                missingKeywords(rep, o, keywords);
                 rawErrorLeak(rep, o);
+                missingKeywords(rep, o, keywords);
             }
-            return "Rejected. " + o.describe();
+            return o.describe();
         });
         assertNoDefects(rep);
     }
@@ -242,8 +266,8 @@ public abstract class BaseTest {
         all.addAll(o.toasts);
         for (String m : all) {
             if (RAW_ERROR.matcher(m).find()) {
-                rep.defect("Raw database/internal error text is shown to the user",
-                        "A friendly validation message (no SQL / constraint / exception text)", m);
+                rep.defect("The application showed technical error text meant for developers instead of a friendly message",
+                        "A short, friendly message in everyday words", "The application showed: \"" + m.replaceAll("\\s+", " ").trim() + "\"");
                 return;
             }
         }
@@ -261,14 +285,14 @@ public abstract class BaseTest {
             }
         }
         if (!missing.isEmpty()) {
-            rep.defect("Validation message does not mention the offending field/rule (missing: " + missing + ")",
-                    "A message mentioning " + List.of(keywords), o.describe());
+            rep.defect("The message does not say which field is wrong (it should mention " + PlainText.quote(missing) + ")",
+                    "A message that mentions " + PlainText.quote(List.of(keywords)), o.describe());
         }
     }
 
-    /** Fails the test when the case recorded soft defects (they were all written to the report already). */
+    /** Fails the test when the case recorded soft problems (they were all written to the report already). */
     protected static void assertNoDefects(TestReporter rep) {
         Assert.assertTrue(rep.defects().isEmpty(),
-                rep.defects().size() + " defect(s) found:\n - " + String.join("\n - ", rep.defects()));
+                rep.defects().size() + " problem(s) found:\n - " + String.join("\n - ", rep.defects()));
     }
 }

@@ -95,7 +95,7 @@ public final class ReproTemplates {
                     + "7. Sign in as admin/EOR: MSA & Contract > MSA, find the client (PENDING), 'Refresh sign status' until IN REVIEW, click the status badge, 'Approve & Activate'.\n"
                     + "8. Clients shows the client as Active; the client's portal shows Company Onboarding 100%.";
         }
-        if (id.equals("E2E-02")) {
+        if (id.equals("TC-E2E-07")) {
             return "1. Sign in as the onboarded (Active) client at " + base() + "/login.\n"
                     + "2. Compare the portal home heading 'Welcome, <company>', the sidebar company name and the top-right profile button (contact name + e-mail) with the registration data.\n"
                     + "3. Click the profile button > 'My Profile' and compare company name, e-mail and phone with the registration data.";

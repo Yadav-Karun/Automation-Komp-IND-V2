@@ -7,9 +7,9 @@
      An existing client that never logged in (first-login cases run too):  add -Dedge.client.fresh=true -Dedge.client.name="<legal name>"
      Classes run one after the other (parallel="none"): reports and screenshots of each class stay separate. -->
 <suite name="KOMP IND Testing - Client onboarding" verbose="1" parallel="none">
-    <test name="Client onboarding - E2E negative and edge cases">
+    <test name="Client onboarding - checks with wrong, missing and unusual input">
         <classes>
-            <class name="tests.ClientOnboardingEdgeCases"/>
+            <class name="tests.client.ClientOnboardingEdgeCases"/>
         </classes>
     </test>
 </suite>

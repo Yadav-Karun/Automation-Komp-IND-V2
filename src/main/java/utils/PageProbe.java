@@ -39,10 +39,22 @@ public final class PageProbe {
             this.denied = DENIED.matcher(text).find();
         }
 
+        /** Where the browser ended up and what is on the page, in plain sentences. */
         public String describe() {
-            String t = text.replaceAll("\\s+", " ").trim();
-            return "requested " + requested + " -> landed on " + path + " | login form: " + loginForm + " | admin content visible: "
-                    + adminContent + " | blank: " + blank + " | page text: '" + (t.length() > 160 ? t.substring(0, 160) + "..." : t) + "'";
+            StringBuilder sb = new StringBuilder();
+            if (requested.startsWith("http")) {
+                sb.append("The address ").append(requested).append(" was opened and the browser ended up on the page ").append(path).append(". ");
+            } else {
+                sb.append("After ").append(requested).append(" the browser is on the page ").append(path).append(". ");
+            }
+            sb.append(loginForm ? "The login form is shown. " : "The login form is not shown. ");
+            sb.append(adminContent ? "The page shows content of the admin area. " : "No content of the admin area is shown. ");
+            if (blank) {
+                sb.append("The page is empty. ");
+            } else {
+                sb.append("The page starts with: \"").append(PlainText.oneLine(text, 100)).append("\".");
+            }
+            return sb.toString().trim();
         }
     }
 

@@ -43,6 +43,118 @@ public class ClientPortalHomePage extends BasePage {
         visible(By.xpath("//*[contains(normalize-space(),'% completed')]"));
     }
 
+    // ---- the tabs of the portal menu (Home, Employees, Projects, MSA) and what a tab page shows ------------------
+
+    /** Clicks a tab of the portal menu (by clicking, not by URL: a full load of /portal/msa lands on /portal) and waits for the page heading. */
+    public void openTab(String tab) {
+        click(By.xpath("//a[starts-with(@href,'/portal')][normalize-space()=" + utils.Xp.literal(tab) + "]"));
+        visible("Home".equals(tab) ? welcome : By.xpath("//main//h1[normalize-space()=" + utils.Xp.literal(tab) + "]"));
+        waitStable();
+    }
+
+    /**
+     * Waits until the content of the page stopped changing: a table appears after its heading and renders again when its data arrives, so reading it at
+     * once meets elements that are replaced under our hands ("stale element"). Max 8 s.
+     */
+    private void waitStable() {
+        java.util.List<String> last = null;
+        long stableSince = System.currentTimeMillis();
+        long end = System.currentTimeMillis() + 8_000;
+        while (System.currentTimeMillis() < end) {
+            java.util.List<String> now;
+            try {
+                now = mainLines();
+            } catch (org.openqa.selenium.StaleElementReferenceException rerendered) {
+                now = null;
+            }
+            if (now != null && now.equals(last)) {
+                if (System.currentTimeMillis() - stableSince > 900) {
+                    return;
+                }
+            } else {
+                last = now;
+                stableSince = System.currentTimeMillis();
+            }
+            try {
+                Thread.sleep(300); // documented wait: the page re-renders after its data arrives
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /** Reads again when the page re-rendered while it was being read (at most 4 tries). */
+    private static <T> T reread(java.util.function.Supplier<T> read) {
+        for (int attempt = 1;; attempt++) {
+            try {
+                return read.get();
+            } catch (org.openqa.selenium.StaleElementReferenceException rerendered) {
+                if (attempt >= 4) {
+                    throw rerendered;
+                }
+            }
+        }
+    }
+
+    /** The first heading of the page content. */
+    public String heading() {
+        return reread(() -> text(By.xpath("(//main//h1)[1]")));
+    }
+
+    /** Every non-empty line of the page content (main area), in reading order. */
+    public java.util.List<String> mainLines() {
+        return reread(() -> {
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            for (String l : text(By.tagName("main")).split("\\R")) {
+                if (!l.isBlank()) {
+                    lines.add(l.trim());
+                }
+            }
+            return lines;
+        });
+    }
+
+    /** The line right after the line that equals the label (e.g. the value under "MSA ID"), or null when the label is not on the page. */
+    public String valueAfter(String label) {
+        java.util.List<String> lines = mainLines();
+        for (int i = 0; i < lines.size() - 1; i++) {
+            if (lines.get(i).equalsIgnoreCase(label)) {
+                return lines.get(i + 1);
+            }
+        }
+        return null;
+    }
+
+    /** Column headers of the first table of the page (a column without a title, such as an action column, is left out). */
+    public java.util.List<String> tableHeaders() {
+        return reread(() -> {
+            java.util.List<String> out = new java.util.ArrayList<>();
+            for (org.openqa.selenium.WebElement th : driver.findElements(By.xpath("//main//table[1]//thead//th"))) {
+                String header = th.getText().trim();
+                if (!header.isEmpty()) {
+                    out.add(header);
+                }
+            }
+            return out;
+        });
+    }
+
+    /** Rows of the first table of the page: one list of cell texts per row (an empty table shows ONE row with the empty-state message). */
+    public java.util.List<java.util.List<String>> tableRows() {
+        return reread(() -> {
+            java.util.List<java.util.List<String>> rows = new java.util.ArrayList<>();
+            for (org.openqa.selenium.WebElement tr : driver.findElements(By.xpath("//main//table[1]//tbody/tr"))) {
+                java.util.List<String> cells = new java.util.ArrayList<>();
+                for (org.openqa.selenium.WebElement td : tr.findElements(By.tagName("td"))) {
+                    cells.add(td.getText().trim().replaceAll("\\s+", " "));
+                }
+                rows.add(cells);
+            }
+            return rows;
+        });
+    }
+
     // ---- profile menu (top right) and the "My Profile" dialog -------------------------------------------
 
     private final By profileButton = By.xpath("(//button[contains(normalize-space(.),'@')])[last()]");

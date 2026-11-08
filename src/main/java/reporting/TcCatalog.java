@@ -1,25 +1,17 @@
 package reporting;
 
-import java.util.Set;
-
 /**
  * Where each test case lives and the exact command to re-run it, for the "TC Catalog" sheet and the Jira bugs.
  * There are only two suites / two test classes:
- *   testng-client-happy-flow.xml  -> tests.ClientOnboardingE2EHappyFlow  (1 client, register ... Active, profile check)
- *   testng-client-edge-cases.xml  -> tests.ClientOnboardingEdgeCases     (1 client, every negative / edge case)
+ *   testng-client-happy-flow.xml  -> tests.client.ClientOnboardingE2EHappyFlow  (1 client, register ... Active, profile check)
+ *   testng-client-edge-cases.xml  -> tests.client.ClientOnboardingEdgeCases     (1 client, every negative / edge case)
  */
 public final class TcCatalog {
 
     public static final String HAPPY_XML = "testng-client-happy-flow.xml";
     public static final String EDGE_XML = "testng-client-edge-cases.xml";
-    public static final String HAPPY_CLASS = "tests.ClientOnboardingE2EHappyFlow";
-    public static final String EDGE_CLASS = "tests.ClientOnboardingEdgeCases";
-
-    /**
-     * Cases that create an EXTRA client when the application accepts their (invalid / special) input. The 2-client rule
-     * keeps them out of a full run: they only run when named in -Dcases.
-     */
-    public static final Set<String> SIDE_EFFECT = Set.of("R-31", "R-50", "R-51", "R-52");
+    public static final String HAPPY_CLASS = "tests.client.ClientOnboardingE2EHappyFlow";
+    public static final String EDGE_CLASS = "tests.client.ClientOnboardingEdgeCases";
 
     private TcCatalog() {
     }
@@ -56,9 +48,6 @@ public final class TcCatalog {
                     + "To re-check the profile of an EXISTING client without creating one: add -Dhappy.client.data=reports/<happy-flow folder>/test-data.json)";
         }
         String cmd = base(EDGE_XML) + " -Dcases=" + c.id;
-        if (SIDE_EFFECT.contains(c.id)) {
-            return cmd + "    (creates 1 EXTRA client if the application accepts the input; skipped in a full run because of the 2-client rule)";
-        }
         if (needsEdgeClient(c)) {
             return cmd + "    (set-up steps register the edge client first; to reuse an existing one add -Dedge.client.email=<yopmail address> "
                     + "and put its password in env KOMP_EDGE_CLIENT_PASSWORD; the first-login password cases need a client that never logged in)";
@@ -77,9 +66,6 @@ public final class TcCatalog {
         }
         if (happy(c)) {
             return "Yes - 1 client (TC-E2E-01); none when -Dhappy.client.data is used";
-        }
-        if (SIDE_EFFECT.contains(c.id)) {
-            return "Only if the application accepts the input (then 1 extra client)";
         }
         if ("R-60".equals(c.id)) {
             return "Yes - 1 client (by design: it is THE edge client, registered with a double click)";

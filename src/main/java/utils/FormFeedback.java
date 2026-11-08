@@ -35,9 +35,28 @@ public final class FormFeedback {
             return !messages.isEmpty() || !toasts.isEmpty();
         }
 
+        /** Everything the application told the user (messages under the fields and pop-up notices), each text once. */
+        public List<String> shownTexts() {
+            List<String> all = new ArrayList<>(messages);
+            all.addAll(toasts);
+            return PlainText.withoutRepeats(all);
+        }
+
+        /** The texts shown, each in double quotes ("" when nothing was shown). */
+        public String quotedTexts() {
+            return PlainText.quote(shownTexts());
+        }
+
+        /** What the application did, in one plain sentence (the report is read by people who are not technical). */
         public String describe() {
-            return (accepted ? "ACCEPTED" : "REJECTED") + " | inline messages: " + (messages.isEmpty() ? "none" : messages)
-                    + " | toasts: " + (toasts.isEmpty() ? "none" : toasts);
+            String shown = quotedTexts();
+            if (accepted) {
+                return "The application accepted the entry and moved on" + (shown.isEmpty() ? ". It showed no message." : ". It showed: " + shown + ".");
+            }
+            if (shown.isEmpty()) {
+                return "The application refused the entry but showed no message, so the user is not told what is wrong.";
+            }
+            return "The application refused the entry and showed " + (shownTexts().size() == 1 ? "this message: " : "these messages: ") + shown + ".";
         }
     }
 

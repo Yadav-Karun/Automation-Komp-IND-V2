@@ -36,8 +36,29 @@ public final class ExecutionInfo {
     private ExecutionInfo() {
     }
 
+    /** The module of the client-onboarding classes (the default). */
+    public static final String MODULE_CLIENT = "Client-Onboarding";
+
+    private static String module = MODULE_CLIENT;
+
+    /** The module the current class belongs to ("Client-Onboarding", "Project-Management"): the first tag of every case and a line of the report header. */
+    public static String module() {
+        return module;
+    }
+
+    /** True for the client-onboarding module (its reports show the test logins by decision of the user; other modules never print a password). */
+    public static boolean isClientModule() {
+        return MODULE_CLIENT.equals(module);
+    }
+
     /** Starts the report of one test class. {@code xmlTestName} is the name of the &lt;test&gt; element of the suite. */
     public static synchronized void begin(String cls, String xmlTestName) {
+        begin(cls, xmlTestName, MODULE_CLIENT);
+    }
+
+    /** Same, for a class of another module (see {@link #module()}). */
+    public static synchronized void begin(String cls, String xmlTestName, String moduleName) {
+        module = moduleName == null || moduleName.isBlank() ? MODULE_CLIENT : moduleName;
         className = cls;
         testName = xmlTestName == null || xmlTestName.isBlank() ? cls : xmlTestName;
         started = LocalDateTime.now();

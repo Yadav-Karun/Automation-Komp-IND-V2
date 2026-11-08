@@ -15,7 +15,7 @@ public final class ExtentManager {
     /**
      * Layout fixes for the Spark template (checked in a browser with a 2-line title):
      * a title that wraps onto a second line no longer runs into the date chips and the tag chips, and the tags
-     * (module + group, e.g. "ClientOnboarding", "E2Eprofilecheck") are shown once in the header of a case, not repeated on every phase row.
+     * (module + group, e.g. "Client-Onboarding", "E2E-verification") are shown once in the header of a case, not repeated on every phase row.
      */
     private static final String CSS =
             ".detail-head .info, .detail-head .info > * { height: auto !important; min-height: 0 !important; }"
@@ -39,11 +39,16 @@ public final class ExtentManager {
             extent.setSystemInfo("Project", ExecutionInfo.PROJECT);
             extent.setSystemInfo("Application", "KOMP Global");
             extent.setSystemInfo("Test class", ExecutionInfo.className());
-            extent.setSystemInfo("Suite (XML test)", ExecutionInfo.testName());
+            extent.setSystemInfo("Test suite", ExecutionInfo.testName());
             extent.setSystemInfo("Environment", ConfigManager.env());
-            extent.setSystemInfo("Base URL", ConfigManager.baseUrl());
-            extent.setSystemInfo("Execution folder", ExecutionInfo.id());
-            extent.setSystemInfo("Client type", ConfigManager.get("client.type", "EOR"));
+            extent.setSystemInfo("Web address of the application", ConfigManager.baseUrl());
+            extent.setSystemInfo("Run folder", ExecutionInfo.id());
+            if (ExecutionInfo.isClientModule()) {
+                extent.setSystemInfo("Client type", ConfigManager.get("client.type", "EOR"));
+            } else {
+                extent.setSystemInfo("Module", ExecutionInfo.module());
+                extent.setSystemInfo("Test", ExecutionInfo.testName());
+            }
             extent.setSystemInfo("OS", System.getProperty("os.name"));
             extent.setSystemInfo("Java", System.getProperty("java.version"));
             addLogins(extent);
@@ -57,6 +62,15 @@ public final class ExtentManager {
      */
     private static void addLogins(ExtentReports e) {
         if (SecretMasker.enabled()) {
+            return;
+        }
+        if (!ExecutionInfo.isClientModule()) {
+            // the brief of the other modules: never a password in a report. The e-mail of the account that ran the test is enough to know who it was.
+            try {
+                e.setSystemInfo("Signed in as (EOR user)", ConfigManager.eorEmail());
+            } catch (RuntimeException ex) {
+                // not configured: the report simply does not list it
+            }
             return;
         }
         try {

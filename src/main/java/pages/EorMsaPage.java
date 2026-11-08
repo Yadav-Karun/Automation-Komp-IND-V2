@@ -36,13 +36,83 @@ public class EorMsaPage extends BasePage {
         return By.xpath("//tbody/tr[td[1][normalize-space()=" + Xp.literal(client) + "]]");
     }
 
+    private boolean searchApplied;
+
+    /** True when the last {@link #searchClient} saw the RESULT of its search on the screen (every shown row contains the searched name). */
+    public boolean searchApplied() {
+        return searchApplied;
+    }
+
+    /** "Showing 1-1 of 1 MSAs" (or "" when not shown). */
+    public String listSummary() {
+        java.util.List<org.openqa.selenium.WebElement> s = driver.findElements(By.xpath("//*[starts-with(normalize-space(text()),'Showing')]"));
+        return s.isEmpty() ? "" : s.get(0).getText().replace("\n", " ").trim();
+    }
+
+    /**
+     * Waits until the list shows the RESULT of the search (every data row contains the searched name, unchanged for 1 s, max 12 s): a slow search leaves
+     * the old, unfiltered list on the screen - the client is in it too - and a screenshot taken then shows the wrong list.
+     */
+    private void waitSearchApplied(String term) {
+        String wanted = term.trim().toLowerCase(java.util.Locale.ROOT);
+        String last = null;
+        long stableSince = System.currentTimeMillis();
+        long end = System.currentTimeMillis() + 12_000;
+        searchApplied = false;
+        while (System.currentTimeMillis() < end) {
+            String texts = null;
+            boolean everyRowMatches = false;
+            try {
+                java.util.List<org.openqa.selenium.WebElement> rows = driver.findElements(By.xpath("//tbody/tr[count(td)>=5]"));
+                StringBuilder sb = new StringBuilder();
+                everyRowMatches = !rows.isEmpty();
+                for (org.openqa.selenium.WebElement tr : rows) {
+                    String row = tr.getText().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+                    sb.append(row).append('|');
+                    if (!row.contains(wanted)) {
+                        everyRowMatches = false;
+                    }
+                }
+                texts = sb.toString();
+            } catch (org.openqa.selenium.StaleElementReferenceException rerendered) {
+                texts = null;
+            }
+            if (texts != null && everyRowMatches && texts.equals(last)) {
+                if (System.currentTimeMillis() - stableSince >= 1000) {
+                    searchApplied = true;
+                    return;
+                }
+            } else {
+                last = texts;
+                stableSince = System.currentTimeMillis();
+            }
+            try {
+                Thread.sleep(300); // documented wait: the list re-renders after typing
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     public void searchClient(String client) {
         type(search, client);
+        waitSearchApplied(client);
         try {
             waitFor(timeout).until(ExpectedConditions.visibilityOfElementLocated(row(client)));
         } catch (TimeoutException e) {
             throw new AssertionError("Client '" + client + "' not found in MSA list after searching for it.");
         }
+    }
+
+    /** Texts of the cells of the client's row: client, MSA id, start date, country, status (the action buttons are left out). */
+    public java.util.List<String> rowTexts(String client) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        java.util.List<org.openqa.selenium.WebElement> cells = driver.findElement(row(client)).findElements(By.tagName("td"));
+        for (int i = 0; i < 5; i++) {
+            out.add(i < cells.size() ? cells.get(i).getText().trim() : "");
+        }
+        return out;
     }
 
     public String msaId(String client) {

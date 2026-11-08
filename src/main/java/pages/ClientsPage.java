@@ -56,12 +56,67 @@ public class ClientsPage extends BasePage {
     public Row findClient(String company) {
         visible(heading);
         type(search, company);
+        waitSearchApplied(company);
         try {
             waitFor(timeout).until(ExpectedConditions.visibilityOfElementLocated(rowFor(company)));
         } catch (TimeoutException e) {
             throw new AssertionError("Client '" + company + "' not found in the Clients list after searching for it.");
         }
         return read(driver.findElement(rowFor(company)));
+    }
+
+    private boolean searchApplied;
+
+    /** True when the last {@link #findClient} saw the RESULT of its search on the screen (every shown row contains the searched name). */
+    public boolean searchApplied() {
+        return searchApplied;
+    }
+
+    /**
+     * Waits until the list shows the RESULT of the search: at least one row and every data row contains the searched text, unchanged for 1 s (max 12 s).
+     * A slow search leaves the old, unfiltered list on the screen for a while - the client we look for is in it too, so "the row is visible" proves nothing -
+     * and a screenshot taken then shows the wrong list (seen in TC-E2E-03). {@link #searchApplied()} tells whether the result was reached.
+     */
+    private void waitSearchApplied(String term) {
+        String wanted = term.trim().toLowerCase(java.util.Locale.ROOT);
+        String last = null;
+        long stableSince = System.currentTimeMillis();
+        long end = System.currentTimeMillis() + 12_000;
+        searchApplied = false;
+        while (System.currentTimeMillis() < end) {
+            String texts = null;
+            boolean everyRowMatches = false;
+            try {
+                List<WebElement> rows = driver.findElements(By.xpath("//tbody/tr[count(td)>=6]"));
+                StringBuilder sb = new StringBuilder();
+                everyRowMatches = !rows.isEmpty();
+                for (WebElement tr : rows) {
+                    String row = tr.getText().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+                    sb.append(row).append('|');
+                    if (!row.contains(wanted)) {
+                        everyRowMatches = false;
+                    }
+                }
+                texts = sb.toString();
+            } catch (org.openqa.selenium.StaleElementReferenceException rerendered) {
+                texts = null;
+            }
+            if (texts != null && everyRowMatches && texts.equals(last)) {
+                if (System.currentTimeMillis() - stableSince >= 1000) {
+                    searchApplied = true;
+                    return;
+                }
+            } else {
+                last = texts;
+                stableSince = System.currentTimeMillis();
+            }
+            try {
+                Thread.sleep(300); // documented wait: the list re-renders after typing
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     // ---- Group C helpers: search, filters, pagination, counters (read-only) --------------------------

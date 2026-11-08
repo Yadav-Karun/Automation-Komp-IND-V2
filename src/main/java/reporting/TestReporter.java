@@ -28,6 +28,7 @@ import base.DriverFactory;
 import model.ClientData;
 import utils.ConfigManager;
 import utils.Log;
+import utils.PlainText;
 import utils.SecretMasker;
 
 /**
@@ -52,9 +53,12 @@ public final class TestReporter {
     private final LocalDateTime started = LocalDateTime.now();
     private final List<String[]> results = new ArrayList<>();      // idx, title, status, screenshot
     private final List<String> defects = new ArrayList<>();
-    private final List<String> defectActuals = new ArrayList<>();
+    /** One plain sentence per problem found: they explain the failure in the header of the case. */
+    private final List<String> defectHeadlines = new ArrayList<>();
     /** The DEFECT screenshot taken during the current phase (the phase result row reuses it). */
     private String phaseDefectShot;
+    /** HTML shown under Expected / Actual of the current phase (the table of {@link ValueChecks}). */
+    private String phaseHtml = "";
     private String testName;
     private String description;
     private final Map<String, List<String>> network = new LinkedHashMap<>();
@@ -79,11 +83,24 @@ public final class TestReporter {
     /** Starts one test case: one Extent test + one Excel row per case. */
     public static TestReporter start(String id, String group, String title, String description, String input,
             String expected, WebDriver driver, ClientData data) {
+        return start(id, group, title, description, input, expected, driver, data, null);
+    }
+
+    /**
+     * Starts one test case of a module that is not about a client (e.g. the project happy flow). {@code headerLine} replaces the "Client: ... | login ..."
+     * line of the case header and of the execution summary; it is asked again when the case ends, so it can show data that was generated during the case.
+     * The tag of the module comes from {@link ExecutionInfo#module()}.
+     */
+    public static TestReporter start(String id, String group, String title, String description, String input,
+            String expected, WebDriver driver, ClientData data, java.util.function.Supplier<String> headerLine) {
+        title = PlainText.simplify(title);
+        description = cleanDescription(PlainText.simplify(description));
         String testName = plain(id + " - " + title);
         ExtentTest t = ExtentManager.get().createTest(testName, plain(description));
         // the report strips spaces from a tag ("E2E profile check" -> "E2Eprofilecheck"): hyphens keep it readable
-        t.assignCategory("Client-Onboarding", group == null ? "General" : group.trim().replaceAll("\\s+", "-"));
+        t.assignCategory(ExecutionInfo.module(), group == null ? "General" : group.trim().replaceAll("\\s+", "-"));
         TestReporter r = new TestReporter(driver, t, data);
+        r.headerLine = headerLine;
         r.testName = testName;
         r.description = plain(description);
         r.record.id = id;
@@ -94,10 +111,11 @@ public final class TestReporter {
         r.record.started = r.started;
         r.record.run = ExecutionInfo.id();
         t.info(esc("Project: " + ExecutionInfo.PROJECT) + "<br>"
+                + (ExecutionInfo.isClientModule() ? "" : "Test: " + esc(ExecutionInfo.testName()) + "<br>Module: " + esc(ExecutionInfo.module()) + "<br>")
                 + "Environment: " + esc(ConfigManager.env()) + " (" + esc(ConfigManager.baseUrl()) + ")<br>"
                 + "Browser: " + esc(DriverFactory.browserVersion(driver)) + "<br>"
                 + "Started: " + TS.format(r.started) + "<br>"
-                + esc(clientLine(data)));
+                + esc(r.header()));
         r.previous = CURRENT.get();
         CURRENT.set(r);
         Log.info("Test started: " + testName + " | client=" + data.legalName + " type=" + data.clientType);
@@ -114,61 +132,99 @@ public final class TestReporter {
         this.slug = slug;
         this.evidenceCount = 0;
         int idx = ++seq;
-        node = test.createNode(plain(String.format("Phase %02d - %s", idx, title)));
+        node = test.createNode(plain(String.format("Step %d - %s", idx, PlainText.simplify(title))));
         Log.info(String.format("Phase %02d START - %s", idx, title));
         NetworkCapture.drain(driver); // discard anything before this phase
         carried.clear();
         int defectsBefore = defects.size();
         phaseDefectShot = null;
+        phaseHtml = "";
         try {
             String actual = action.run();
             List<ApiCall> calls = collectCalls();
             if (defects.size() > defectsBefore) {
                 // the phase ran to the end but found a product defect (soft check): the phase result is FAIL, never PASS
                 String shot = phaseDefectShot != null ? phaseDefectShot : ScreenshotManager.capture(driver, fileName(idx, "FAIL"), true);
-                node.fail(detail(expected, "DEFECT FOUND - " + actual) + apiHtml(idx, title, calls), media(shot));
+                node.fail(detail(expected, "PROBLEM FOUND - " + actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
                 results.add(new String[] { String.valueOf(idx), title, "FAIL", shot });
-                recordPhase(idx, title, expected, "DEFECT FOUND - " + SecretMasker.mask(actual), "FAIL", shot);
+                recordPhase(idx, title, expected, "PROBLEM FOUND - " + SecretMasker.mask(actual), "FAIL", shot);
                 Log.error(String.format("Phase %02d FAIL (defect) - %s | %s", idx, title, actual));
                 return;
             }
             String shot = ScreenshotManager.capture(driver, fileName(idx, "PASS"), false);
-            node.pass(detail(expected, actual) + apiHtml(idx, title, calls), media(shot));
+            node.pass(detail(expected, actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
             results.add(new String[] { String.valueOf(idx), title, "PASS", shot });
             recordPhase(idx, title, expected, SecretMasker.mask(actual), "PASS", shot);
             Log.info(String.format("Phase %02d PASS - %s | %s", idx, title, actual));
         } catch (Throwable t) {
             if (!(t instanceof org.testng.SkipException) && utils.Connectivity.isNetworkFailure(driver, t)) {
                 // a lost connection is not an application result: SKIP with the reason, never FAIL (the next case waits for the network)
-                t = new org.testng.SkipException("The network connection to the application was lost during this step ("
-                        + utils.Connectivity.describe(t) + "). This is not an application result: run the case again (-Dcases="
-                        + record.id + ").");
+                t = new org.testng.SkipException("The internet connection to the application was lost during this step, so the result is unknown "
+                        + "(this is not a problem of the application). Run the test again. [" + utils.Connectivity.describe(t) + "]");
             }
             if (t instanceof org.testng.SkipException) {
                 // a case can skip itself mid-way ("only one page of clients"): that is a SKIP with its reason, not a failure
                 List<ApiCall> skipCalls = collectCalls();
                 String skipReason = SecretMasker.mask(t.getMessage() == null ? "skipped" : t.getMessage());
                 String skipShot = ScreenshotManager.capture(driver, fileName(idx, "SKIP"), false);
-                node.skip(detail(expected, "SKIPPED: " + skipReason) + apiHtml(idx, title, skipCalls), media(skipShot));
+                node.skip(detail(expected, "NOT RUN - " + skipReason) + phaseHtml + technical(apiHtml(idx, title, skipCalls)), media(skipShot));
                 results.add(new String[] { String.valueOf(idx), title, "SKIP", skipShot });
-                recordPhase(idx, title, expected, "SKIPPED: " + skipReason, "SKIP", skipShot);
+                recordPhase(idx, title, expected, "NOT RUN - " + skipReason, "SKIP", skipShot);
                 Log.info(String.format("Phase %02d SKIP - %s | %s", idx, title, skipReason));
                 throw (org.testng.SkipException) t;
             }
             List<ApiCall> calls = collectCalls();
             String shot = ScreenshotManager.capture(driver, fileName(idx, "FAIL"), true);
-            String reason = SecretMasker.mask(t.getMessage() == null ? t.toString() : t.getMessage());
+            String technicalText = SecretMasker.mask(t.getMessage() == null ? t.toString() : t.getMessage());
+            // a failed check of the test (AssertionError) already says in words what is wrong; anything else (a button was not found, a timeout ...)
+            // is a problem of the test run, not a sentence for the reader: the words stay in the folded technical block
+            String reason = t instanceof AssertionError ? PlainText.assertion(technicalText) : STEP_NOT_COMPLETED;
             String console = String.join("<br>", NetworkCapture.severeConsole(driver).stream().map(TestReporter::esc).toList());
-            node.fail(detail(expected, "FAILED: " + reason)
-                    + "<br><b>Exception:</b><pre>" + esc(SecretMasker.mask(stack(t))) + "</pre>"
-                    + (console.isEmpty() ? "" : "<b>Browser console (SEVERE):</b><br>" + console)
-                    + apiHtml(idx, title, calls), media(shot));
+            String label = t instanceof AssertionError ? "PROBLEM FOUND - " : "THE TEST COULD NOT COMPLETE THIS STEP - ";
+            node.fail(detail(expected, label + reason) + phaseHtml
+                    + technical("<b>Technical message:</b> " + esc(PlainText.oneLine(technicalText, 700))
+                            + "<br><b>Error trace:</b><pre>" + esc(SecretMasker.mask(stack(t))) + "</pre>"
+                            + (console.isEmpty() ? "" : "<b>Errors written by the browser:</b><br>" + console)
+                            + apiHtml(idx, title, calls)), media(shot));
             results.add(new String[] { String.valueOf(idx), title, "FAIL", shot });
-            recordPhase(idx, title, expected, "FAILED: " + reason, "FAIL", shot);
-            Log.error(String.format("Phase %02d FAIL - %s | %s", idx, title, reason));
-            throw t instanceof Error ? (Error) t : new AssertionError(
-                    "Phase " + idx + " (" + title + ") failed: " + reason, t);
+            recordPhase(idx, title, expected, label + reason, "FAIL", shot);
+            Log.error(String.format("Phase %02d FAIL - %s | %s", idx, title, technicalText));
+            throw t instanceof Error ? (Error) t : new AssertionError(reason, t);
         }
+    }
+
+    /** The sentence for a step that could not be carried out (not a result of the application): the technical words are in the folded block. */
+    private static final String STEP_NOT_COMPLETED = "The page did not show what the test needed (for example a button, a field or a message did not appear in time). "
+            + "The technical message is in the folded details below.";
+
+    /** Fills the table of checked values of one page: the test adds one row per value ({@link ValueChecks#eq} / {@link ValueChecks#check}). */
+    @FunctionalInterface
+    public interface CheckAction {
+        void run(ValueChecks checks) throws Exception;
+    }
+
+    /**
+     * A phase that checks many values of ONE page. The values are shown as one table (wrong ones in red and listed first), the page gets ONE screenshot,
+     * and the verdict comes from the table: any wrong value = the phase and the case FAIL with "N of M values are wrong - the other values are correct".
+     */
+    public void phaseChecks(String slug, String title, String expected, CheckAction action) {
+        phase(slug, title, expected, () -> {
+            ValueChecks checks = new ValueChecks();
+            try {
+                action.run(checks);
+            } finally {
+                attachHtml(checks.html()); // also when a step threw: show what was checked until then
+            }
+            if (checks.failed() > 0) {
+                defect(title, expected, checks.failureText(), false, checks.failureText());
+            }
+            return checks.summary();
+        });
+    }
+
+    /** HTML (e.g. a table of checked values) shown under Expected / Actual of the current phase. */
+    public void attachHtml(String html) {
+        phaseHtml = html == null ? "" : html;
     }
 
     private final List<ApiCall> carried = new ArrayList<>();
@@ -190,25 +246,37 @@ public final class TestReporter {
     public void evidence(String label) {
         String shot = ScreenshotManager.capture(driver,
                 fileName(seq, "PASS") .replace("_PASS.png", "_" + (++evidenceCount) + "_" + label + "_PASS.png"), false);
-        node.info("Evidence: " + esc(label), media(shot));
+        node.info("Extra screenshot: " + esc(PlainText.simplify(label.replace('_', ' '))), media(shot));
     }
 
-    /** Soft check: a genuine product defect that does not block the rest of the journey. */
+    /** Soft check: a genuine problem of the application that does not block the rest of the journey. Write {@code title} as a plain sentence. */
     public void defect(String title, String expected, String actual) {
-        String line = "Phase " + seq + " - " + title + " | expected: " + expected + " | actual: " + actual;
+        defect(title, expected, actual, true, title);
+    }
+
+    /**
+     * @param screenshot false when the phase itself takes the one screenshot of the page and shows the details (a table of values): no extra picture,
+     *                   no extra red line - the problem is only registered (the phase and the case turn FAIL, the report header says why)
+     * @param headline   the sentence that explains the problem in the header of the failed case (the title, or for a table of values the list of wrong values)
+     */
+    private void defect(String title, String expected, String actual, boolean screenshot, String headline) {
+        title = PlainText.simplify(title);
+        String line = "Step " + seq + " - " + title + " | What should happen: " + PlainText.simplify(expected) + " | What happened: " + PlainText.simplify(actual);
         defects.add(line);
-        defectActuals.add(SecretMasker.mask(actual));
+        defectHeadlines.add(SecretMasker.mask(PlainText.simplify(headline)));
         record.defects.add(title + " | expected: " + expected + " | actual: " + SecretMasker.mask(actual));
-        String shot = ScreenshotManager.capture(driver, fileName(seq, "DEFECT"), true);
-        record.defectScreenshot = shot;
-        phaseDefectShot = shot;
-        node.fail("<b>DEFECT:</b> " + esc(title) + detail(expected, actual), media(shot));
+        if (screenshot) {
+            String shot = ScreenshotManager.capture(driver, fileName(seq, "DEFECT"), true);
+            record.defectScreenshot = shot;
+            phaseDefectShot = shot;
+            node.fail("<b>PROBLEM FOUND:</b> " + esc(title) + detail(expected, actual), media(shot));
+        }
         Log.error("DEFECT " + line);
     }
 
     public void note(String message) {
         if (node != null) {
-            node.info(esc(message));
+            node.info(esc(PlainText.simplify(message)));
         }
         Log.info(message);
     }
@@ -242,38 +310,42 @@ public final class TestReporter {
         }
         LocalDateTime ended = LocalDateTime.now();
         StringBuilder sb = new StringBuilder();
-        sb.append("<b>Overall result: ").append(overall).append("</b><br>")
+        sb.append("<b>Result of this test: ").append(resultWord(overall)).append("</b><br>")
                 .append("Started: ").append(TS.format(started)).append(" | Ended: ").append(TS.format(ended))
                 .append(" | Duration: ").append(duration(Duration.between(started, ended))).append("<br>")
-                .append(esc(clientLine(data))).append("<br>")
-                .append("<table border='1' cellpadding='4'><tr><th>#</th><th>Phase</th><th>Result</th><th>Screenshot</th></tr>");
+                .append(esc(header())).append("<br>")
+                .append("<table border='1' cellpadding='4'><tr><th>#</th><th>Step</th><th>Result</th><th>Screenshot</th></tr>");
         for (String[] r : results) {
-            sb.append("<tr><td>").append(r[0]).append("</td><td>").append(esc(r[1])).append("</td><td>").append(r[2])
+            sb.append("<tr><td>").append(r[0]).append("</td><td>").append(esc(PlainText.simplify(r[1]))).append("</td><td>").append(resultWord(r[2]))
                     .append("</td><td>").append(r[3] == null ? "-" : "<a href='" + r[3] + "'>" + r[3] + "</a>").append("</td></tr>");
         }
         sb.append("</table>");
         if (!defects.isEmpty()) {
-            sb.append("<br><b>Defects found (").append(defects.size()).append("):</b><ul>");
+            sb.append("<br><b>Problems found (").append(defects.size()).append("):</b><ul>");
             defects.forEach(d -> sb.append("<li>").append(esc(d)).append("</li>"));
             sb.append("</ul>");
         }
-        sb.append("<br><b>API validation:</b> NOT CONFIGURED - no documented API contract was supplied, so API calls are ")
-                .append("recorded as observations only (method, path, status). UI results above are independent of this.");
+        StringBuilder tech = new StringBuilder("<br>The requests the pages sent to the server are recorded for information only (no description of the "
+                + "server interface was supplied). The results above are based on what a user sees on the screen.");
         if (!apiObservations.isEmpty()) {
-            sb.append("<br><b>API observations (4xx/5xx):</b><ul>");
-            apiObservations.forEach(o -> sb.append("<li>").append(esc(o)).append("</li>"));
-            sb.append("</ul>");
+            tech.append("<br><b>Server replies that were not successful (4xx = request refused, 5xx = server error):</b><ul>");
+            apiObservations.forEach(o -> tech.append("<li>").append(esc(o)).append("</li>"));
+            tech.append("</ul>");
         }
+        sb.append(technical(tech.toString()));
         Status s = "PASS".equals(overall) ? Status.PASS : "SKIP".equals(overall) ? Status.SKIP : Status.FAIL;
-        ExtentTest summary = test.createNode("Execution summary");
+        ExtentTest summary = test.createNode("Summary of this test");
         summary.log(s, sb.toString());
-        if (failure != null && !"PASS".equals(overall)) {
-            summary.log(Status.INFO, (("SKIP".equals(overall)) ? "Skipped: " : "Failure: ")
-                    + esc(SecretMasker.mask(String.valueOf(failure.getMessage()))));
+        if (failure != null && !"PASS".equals(overall) && (defects.isEmpty() || "SKIP".equals(overall))) {
+            // a failure with problems listed above says the same twice: the sentence is only added when it is the one explanation
+            summary.log(Status.INFO, (("SKIP".equals(overall)) ? "Why it was not run: " : "Why it failed: ")
+                    + esc(PlainText.simplify(PlainText.assertion(SecretMasker.mask(String.valueOf(failure.getMessage()))))));
         }
         writeNetworkSummary(overall);
         if ("FAIL".equals(overall)) {
             nameTheFailure(failure);
+        } else if ("SKIP".equals(overall)) {
+            nameTheSkip(failure);
         }
         record.status = overall;
         record.ended = ended;
@@ -299,10 +371,24 @@ public final class TestReporter {
         return s == null ? null : s.replace("<", "<​");
     }
 
+    /** Supplies the line under the case title for modules that are not about a client (null = the client line). */
+    private java.util.function.Supplier<String> headerLine;
+
+    private String header() {
+        if (headerLine != null) {
+            try {
+                return headerLine.get();
+            } catch (RuntimeException e) {
+                Log.warn("Case header line not written: " + e.getMessage());
+            }
+        }
+        return clientLine(data);
+    }
+
     /** "Client: Black Clover | type EOR | login asta@yopmail.com | password ... | temporary password ..." (secrets shown unless masking is on). */
     private static String clientLine(ClientData d) {
         StringBuilder sb = new StringBuilder("Client: ").append(d.legalName).append(" | type ").append(d.clientType)
-                .append(" | login e-mail ").append(SecretMasker.maskEmail(d.email));
+                .append(" | login e-mail ").append(PlainText.oneLine(SecretMasker.maskEmail(d.email), 70));
         if (d.password != null) {
             sb.append(" | password ").append(SecretMasker.reveal(d.password));
         }
@@ -314,21 +400,62 @@ public final class TestReporter {
 
     /**
      * A case title says what the case CHECKS ("... documents are shown"), which reads like a false statement next to a red Fail.
-     * So a failed case gets the reason in front of its description line (right under the title): "FAILED because: <what was wrong> | Checked: <what
-     * the case checks>". The name itself is left alone (a longer name wraps and crowds the header).
+     * So a failed case gets the reason in front of its description line (right under the title), in plain sentences:
+     * "FAILED because: <what was wrong> | What was checked: <what the case checks>". The name itself is left alone (a longer name wraps and crowds the header).
      */
     private void nameTheFailure(Throwable failure) {
         try {
-            String why = !defectActuals.isEmpty() ? defectActuals.get(0)
-                    : failure != null && failure.getMessage() != null ? SecretMasker.mask(failure.getMessage()) : "see the steps";
-            why = why.replaceAll("\\s+", " ").trim();
-            if (why.length() > 300) {
-                why = why.substring(0, 297) + "...";
+            String why;
+            if (!defectHeadlines.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (String h : defectHeadlines.subList(0, Math.min(2, defectHeadlines.size()))) {
+                    String one = h.replaceAll("\\s+", " ").trim();
+                    sb.append(sb.length() == 0 ? "" : " ").append(one).append(one.endsWith(".") ? "" : ".");
+                }
+                why = sb.toString();
+            } else if (failure != null && failure.getMessage() != null) {
+                why = PlainText.firstSentences(PlainText.assertion(SecretMasker.mask(failure.getMessage())), 2);
+            } else {
+                why = "see the steps below";
             }
-            test.getModel().setDescription(plain("FAILED because: " + why + "  |  Checked: " + description));
+            why = PlainText.oneLine(PlainText.simplify(why), 480);
+            test.getModel().setDescription(plain("FAILED because: " + why + "  |  What was checked: " + description));
         } catch (RuntimeException e) {
             Log.warn("Failed case not renamed in the report: " + e.getClass().getSimpleName());
         }
+    }
+
+    /** A skipped case says why right under its title (the reason is not hidden in the folded summary). */
+    private void nameTheSkip(Throwable skip) {
+        try {
+            String why = skip == null || skip.getMessage() == null ? "see the summary below" : PlainText.assertion(SecretMasker.mask(skip.getMessage()));
+            why = PlainText.oneLine(PlainText.simplify(why), 480);
+            test.getModel().setDescription(plain("NOT RUN because: " + why + "  |  What was checked: " + description));
+        } catch (RuntimeException e) {
+            Log.warn("Skipped case not renamed in the report: " + e.getClass().getSimpleName());
+        }
+    }
+
+    /** The description of the case without the internal group code ("A1 Register client negative test: Email ..." -> "Register client - Email ..."). */
+    static String cleanDescription(String d) {
+        if (d == null) {
+            return "";
+        }
+        return d.replaceFirst("^[A-Z][0-9]+\\s+", "").replace(" negative test: ", " - ");
+    }
+
+    /** PASS / FAIL / SKIP in words. */
+    private static String resultWord(String status) {
+        return "PASS".equals(status) ? "Passed" : "SKIP".equals(status) ? "Not run" : "Failed";
+    }
+
+    /** Evidence for developers (server requests, error traces) goes into a folded block, so the text above it stays readable for everybody. */
+    private static String technical(String inner) {
+        if (inner == null || inner.isEmpty()) {
+            return "";
+        }
+        return "<details style='margin-top:10px'><summary style='cursor:pointer;color:#555'><b>Technical details (only for developers - click to open)</b></summary>"
+                + inner + "</details>";
     }
 
     private void writeNetworkSummary(String overall) {
@@ -372,7 +499,7 @@ public final class TestReporter {
     }
 
     private static String detail(String expected, String actual) {
-        return "<br><b>Expected:</b> " + esc(expected) + "<br><b>Actual:</b> " + esc(SecretMasker.mask(actual));
+        return "<br><b>What should happen:</b> " + esc(PlainText.simplify(expected)) + "<br><b>What happened:</b> " + esc(SecretMasker.mask(PlainText.simplify(actual)));
     }
 
     private String apiHtml(int idx, String title, List<ApiCall> calls) {
@@ -387,10 +514,10 @@ public final class TestReporter {
         if (lines.isEmpty()) {
             return "";
         }
-        StringBuilder sb = new StringBuilder("<br><b>API calls observed (not contract-validated):</b><br><small>");
+        StringBuilder sb = new StringBuilder("<br><b>Requests the page sent to the server during this step (recorded for information only):</b><br><small>");
         lines.stream().limit(15).forEach(l -> sb.append(esc(l)).append("<br>"));
         if (lines.size() > 15) {
-            sb.append("... +").append(lines.size() - 15).append(" more (see api-evidence/network-summary.json)");
+            sb.append("... and ").append(lines.size() - 15).append(" more (see api-evidence/network-summary.json)");
         }
         return sb.append("</small>").toString();
     }

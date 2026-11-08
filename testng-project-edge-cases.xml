@@ -1,0 +1,15 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- PROJECT MANAGEMENT - EDGE CASES (negative, boundary and behaviour scenarios). One test class = one report folder named after the class.
+     Two cases, each covering ALL scenarios of its project type as steps of ONE case: TC-PRJ-03 = AOR, TC-PRJ-04 = EOR.
+     There is no limit on projects (a scenario that the application accepts creates a project); no client is created.
+     Run:  mvn clean test -Dsuite=testng-project-edge-cases.xml
+     One case only:  add -Dcases=TC-PRJ-03   (or TC-PRJ-04)
+     Some scenarios only:  add -Dcases=AOR-V03,AOR-D01   (set-up steps run on demand)
+     Fixed client:  -Dproject.client="Bleach"      Fixed random choice of the client:  -Dproject.seed=<n> -->
+<suite name="KOMP IND Testing - Project Management" verbose="1" parallel="none">
+    <test name="Regression Testing - Project Creation (edge cases)">
+        <classes>
+            <class name="tests.project.ProjectCreationEdgeCases"/>
+        </classes>
+    </test>
+</suite>
