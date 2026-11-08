@@ -96,7 +96,7 @@ A FAIL on a negative case means a finding: the application accepted input it sho
 | P-00, P-02, P-10..P-23, P-30 | Welcome mail, first login, password rules, permanent password |
 | B-10..B-21, B-26 | The client on admin URLs, session / reload |
 | O-00..O-25 | Organization Details (step 1) |
-| D-01..D-11, D-20 | Documents |
+| D-01..D-11 | Documents |
 | C-00..C-21 | Points of Contact (step 2) |
 | B-30..B-37 | Wizard: refresh, browser Back, re-login, Review page, **back-and-edit** (B-35 / B-36: change values after Back, they must reach the Review page), B-37 documents still attached after Back |
 | B-22..B-25, B-40, B-41 | Admin session / deep link / sign-out, EOR status of an ACTIVE client |

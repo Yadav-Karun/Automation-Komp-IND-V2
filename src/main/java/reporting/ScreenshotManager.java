@@ -126,7 +126,15 @@ public final class ScreenshotManager {
     /** The whole page as PNG bytes (falls back to the normal screenshot of the visible area when the full page cannot be taken). */
     public static byte[] capturePng(WebDriver driver) {
         byte[] full = fullPage(driver);
-        return full != null ? full : ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
+        if (full != null) {
+            return full;
+        }
+        RunBanner.visible(driver, false); // the progress bar belongs to the person watching the run, not to the evidence: hidden only for the moment of the picture
+        try {
+            return ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
+        } finally {
+            RunBanner.visible(driver, true);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -159,7 +167,13 @@ public final class ScreenshotManager {
             // capture down to the end of the real content (not the whole enlarged view, which can be mostly empty), at least the normal view
             long cut = Math.min(total, Math.max((long) Math.ceil(height), (long) Math.ceil(bottom.doubleValue() + 24)));
             Map<String, Object> clip = Map.<String, Object>of("x", 0, "y", 0, "width", width, "height", (double) cut, "scale", 1);
-            Map<String, Object> shot = chrome.executeCdpCommand("Page.captureScreenshot", Map.<String, Object>of("format", "png", "clip", clip));
+            RunBanner.visible(driver, false); // hidden only for the moment of the picture (see capturePng)
+            Map<String, Object> shot;
+            try {
+                shot = chrome.executeCdpCommand("Page.captureScreenshot", Map.<String, Object>of("format", "png", "clip", clip));
+            } finally {
+                RunBanner.visible(driver, true);
+            }
             return Base64.getDecoder().decode((String) shot.get("data"));
         } catch (RuntimeException e) {
             return null; // not possible right now: the caller takes the normal screenshot

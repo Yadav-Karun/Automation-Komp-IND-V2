@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
 import java.util.regex.Pattern;
 
@@ -18,12 +19,15 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.DataProvider;
+import org.testng.annotations.Test;
 
 import model.ClientData;
 import reporting.ExcelReportWriter;
 import reporting.ExecutionInfo;
 import reporting.ExtentManager;
 import reporting.ResultCollector;
+import reporting.RunBanner;
 import reporting.TestReporter;
 import utils.ConfigManager;
 import utils.Connectivity;
@@ -45,6 +49,11 @@ public abstract class BaseTest {
 
     protected WebDriver driver;
 
+    /** Test cases of this class (planned) and finished so far: shown in the bar of the browser ({@link RunBanner}). */
+    private int plannedCases = -1; // counted just before the first case: the test class has decided by then which cases exist (e.g. a reused client has no first-login cases)
+    private int finishedCases;
+    private long runStartMs = System.currentTimeMillis(); // the timer of the bar counts from here
+
     // ================================================================== lifecycle
 
     @BeforeClass(alwaysRun = true)
@@ -61,6 +70,8 @@ public abstract class BaseTest {
             driver = DriverFactory.create();
             Log.info("Browser: " + DriverFactory.browserVersion(driver) + " | OS: " + System.getProperty("os.name"));
             browserReady();
+            finishedCases = 0;
+            runStartMs = System.currentTimeMillis();
         } catch (RuntimeException | Error e) {
             Log.error("The test class could not start: " + e.getMessage()
                     + " (check config/config.properties, config/secrets.local.properties and config/documents.properties)");
@@ -91,6 +102,11 @@ public abstract class BaseTest {
 
     @BeforeMethod(alwaysRun = true)
     public void ensureBrowserAlive() {
+        if (plannedCases < 0) {
+            plannedCases = countPlannedCases();
+            Log.info("Test cases planned for this run: " + plannedCases);
+            RunBanner.update(driver, plannedCases, finishedCases, runStartMs);
+        }
         if (driver != null && alive(driver)) {
             recoverFromNetworkLoss();
             return;
@@ -100,6 +116,7 @@ public abstract class BaseTest {
         DriverFactory.quit(driver);
         driver = DriverFactory.create();
         browserReady();
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs);
     }
 
     /**
@@ -148,7 +165,60 @@ public abstract class BaseTest {
         if (r != null) {
             r.finish(result);
         }
+        boolean notSelected = result.getThrowable() != null && "Not selected by -Dcases".equals(result.getThrowable().getMessage());
+        if (!notSelected) {
+            finishedCases++; // a case that -Dcases filtered out does not count as run
+        }
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs); // before the report file is written (that takes longer with every case): the bar must not lag
         ExtentManager.flush();
+    }
+
+    /**
+     * How many test cases this run will go through: every @Test method, a data-driven one once per row of its data provider (the number TestNG reports as "Tests run").
+     * With -Dcases it is the number of ids that were asked for.
+     */
+    private int countPlannedCases() {
+        try {
+            String filter = ConfigManager.get("cases");
+            if (filter != null) {
+                return (int) java.util.Arrays.stream(filter.split(",")).filter(s -> !s.isBlank()).count();
+            }
+            int n = 0;
+            for (Method m : getClass().getMethods()) {
+                Test t = m.getAnnotation(Test.class);
+                if (t == null || !t.enabled()) {
+                    continue;
+                }
+                n += t.dataProvider().isEmpty() ? Math.max(1, t.invocationCount()) : providerRows(t.dataProvider());
+            }
+            return n;
+        } catch (RuntimeException e) {
+            return 0;
+        }
+    }
+
+    private int providerRows(String name) {
+        for (Method p : getClass().getMethods()) {
+            DataProvider dp = p.getAnnotation(DataProvider.class);
+            if (dp != null && name.equals(dp.name().isEmpty() ? p.getName() : dp.name()) && p.getParameterCount() == 0) {
+                try {
+                    Object rows = p.invoke(this);
+                    if (rows instanceof Object[]) {
+                        return ((Object[]) rows).length;
+                    }
+                    if (rows instanceof java.util.Iterator) {
+                        int c = 0;
+                        for (java.util.Iterator<?> it = (java.util.Iterator<?>) rows; it.hasNext(); it.next()) {
+                            c++;
+                        }
+                        return c;
+                    }
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    return 1;
+                }
+            }
+        }
+        return 1;
     }
 
     @AfterClass(alwaysRun = true)
@@ -178,6 +248,7 @@ public abstract class BaseTest {
         Log.info(bar);
         Log.info(ExecutionInfo.className() + " finished: " + cases.size() + " test case(s) | " + pass + " passed | " + fail
                 + " FAILED (each failure is an application defect or a failed check: see the report) | " + skip + " skipped");
+        Log.info("Browser bar     : planned " + plannedCases + " test cases, finished " + finishedCases);
         Log.info("HTML report : " + ExecutionInfo.reportFile().toAbsolutePath());
         Log.info("Screenshots : " + ExecutionInfo.screenshots().toAbsolutePath());
         List<String> wording = PlainText.wordingNotes();

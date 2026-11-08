@@ -8,7 +8,7 @@ Independent of the old `C:\Testing\KOMP IND - Java` repo: never modify that repo
 | XML suite (repo root) | Test class (`src/test/java/tests/client/`, package `tests.client`) | What it does | Clients created |
 |---|---|---|---|
 | `testng-client-happy-flow.xml` | `ClientOnboardingE2EHappyFlow` | **8 test cases.** TC-E2E-01 = the whole happy journey (register -> ... -> Active, 17 phases in ONE case), then TC-E2E-02..08 = re-check the finished client in this order: MSA list -> Clients list -> admin profile -> Point of Contact tab -> MSA tab -> client sign-in + My Profile -> every client-portal tab; one table of values per page | **1** |
-| `testng-client-edge-cases.xml` | `ClientOnboardingEdgeCases` | **202 test cases** (74 test methods, many data-driven): every negative / edge case of the module, on ONE client, plus read-only admin / Clients-list checks | **1** |
+| `testng-client-edge-cases.xml` | `ClientOnboardingEdgeCases` | **201 test cases** (73 test methods, many data-driven): every negative / edge case of the module, on ONE client, plus read-only admin / Clients-list checks | **1** |
 
 The shared lifecycle (browser, report, helpers) is `src/main/java/base/BaseTest.java`, kept OUT of `tests/` so that the folder `tests/client/` holds only the two client-onboarding classes (tests of other modules get their own folder next to it).
 **No load testing; nothing that could break or flood the shared environment.**
@@ -90,6 +90,11 @@ rebuilt classes with the Eclipse compiler and wrote `java.lang.Error: Unresolved
 (the stub is newer than the source). Fix: `mvn clean test-compile` (clean is required), then Command Palette > **Java: Clean Java Language Server Workspace** > Restart and delete.
 Runs through Maven (Terminal / Task / Favorites) always rebuild with javac and are not affected.
 Other switches: `-Denv=preprod` (needs preprod logins), `-Dclient.type=AOR` (never executed), `-DHeadless=true` (only when asked).
+**Progress bar in the browser** (`reporting/RunBanner`, user request 2026-11-08): a small box on the visible browser shows "Total TC - N / Ran so far - N / Remaining - N / Time - MM:SS" and a thin progress line. It is for the person
+watching the run only: drawn outside the page body, click-through except its drag grip (the dotted handle on the left: drag it anywhere in the window, the position is remembered), top window only, every error swallowed;
+`-Drun.banner=false` switches it off. No blinking: the numbers change in place (the line moves with a transition), the timer runs inside the browser, the bar is updated BEFORE the report file is written (that gets slower with every case),
+and it is hidden only for the instant of a report picture (never in the evidence). The total is counted just before the first case (data-driven cases = one per data row; with `-Dcases` = the number of ids); the log prints
+"Test cases planned for this run: N" and, at the end, planned vs finished.
 `login.ratelimit.max.wait.seconds` (default 600) caps how long a run waits when the app answers "Too many sign-in attempts" (HTTP 429).
 `network.wait.max.seconds` (default 600) caps how long a run waits for the application after the internet connection was lost (see section 2).
 Configuration: `config/config.properties` (no secrets), `config/documents.properties` (CIN.pdf / GSTIN.pdf paths), `config/secrets.local.properties` (gitignored: logins,
@@ -160,7 +165,7 @@ are correct" instead of several cases that show the same page. When an existing 
 | TC-E2E-07 | Sign in as the client: portal home and My Profile | Welcome heading = company name, Company Onboarding 100%, the profile button shows the contact name and e-mail, My Profile shows company name, e-mail and phone |
 | TC-E2E-08 | Client portal, every tab of the left menu in turn (one step + table + screenshot each): Home, Employees, Projects, MSA | Each tab opens with its heading and content; Home shows 100% and the three steps; Employees / Projects show their columns and the list or the empty message (a new client has none); MSA shows this client's name, status ACTIVE, MSA id and the amendment row; no request a tab sends to the server fails (no server error) |
 
-### Edge cases - `ClientOnboardingEdgeCases` (202 test cases)
+### Edge cases - `ClientOnboardingEdgeCases` (201 test cases)
 
 #### Login (signed out)
 
@@ -256,7 +261,7 @@ are correct" instead of several cases that show the same page. When an existing 
 | B-16 | Client cannot open admin page /appraisal | Signed in as the edge client (masked), open https://sandbox.kompglobal.com/appraisal | The client should be sent away or told that access is denied, and must not see any admin page |
 | B-17 | Client cannot open admin page /financials/eor/attendance | Signed in as the edge client (masked), open https://sandbox.kompglobal.com/financials/eor/attendance | The client should be sent away or told that access is denied, and must not see any admin page |
 | B-18 | Client opening the root URL / lands in the client portal | Signed in as the edge client, open https://sandbox.kompglobal.com/ | The client portal home (/portal) should open, not the admin dashboard |
-| B-19 | Signed-in client opening /login is sent back to the portal | Signed in as the edge client, open https://sandbox.kompglobal.com/login | The user should be sent back to the portal (a signed-in user must not be shown the login form again) |
+| B-19 | Signed-in client opening /login: what the application shows | Signed in as the edge client, open https://sandbox.kompglobal.com/login | A readable page. Best: the client is sent back to the portal. If the login form is shown again it is only noted (the sign-in is still valid) |
 | B-20 | Unknown URL as a signed-in client shows a readable page | Signed in as the edge client, open https://sandbox.kompglobal.com/no-such-page-xyz | Not-found message or redirect to the portal; never a blank page |
 | B-21 | The client stays signed in after the portal page is reloaded | Signed in as the edge client, open https://sandbox.kompglobal.com/portal again (full page load) | Still signed in on the portal; no login prompt |
 | B-26 | Refresh (F5) on the client portal keeps the client signed in | Signed in as the edge client on /portal, press F5 | The portal home is shown again, no login prompt |
@@ -306,7 +311,6 @@ are correct" instead of several cases that show the same page. When an existing 
 | D-08 | Executable (.exe) as GST document | GST slot, file 'fake_program.exe' (46 bytes) | The application should refuse the file with a message and attach no document |
 | D-10 | Valid PDF with spaces and symbols in its name is accepted | Copy of the CIN pdf named 'cin & test (1) #final.pdf' | Upload accepted and shown with a Remove control |
 | D-11 | Remove a document, then upload it again | Valid CIN pdf uploaded, removed, uploaded again | File disappears after Remove and can be uploaded again |
-| D-20 | Continue with no CIN and no GST document | Valid organization data, both documents removed (assumes documents are mandatory - confirm with product) | The application should refuse to continue and show a message asking for the documents |
 
 #### Points of Contact (wizard step 2)
 
@@ -353,7 +357,7 @@ are correct" instead of several cases that show the same page. When an existing 
 | ID | What it tests | Input / data | Expected |
 |---|---|---|---|
 | B-22 | The admin stays signed in when the /clients address is opened directly | Signed in as admin, open https://sandbox.kompglobal.com/clients by URL (full page load) | The Clients page is shown, not the login page or the dashboard |
-| B-23 | Signed-in admin opening /login is sent back to the console | Signed in as admin, open https://sandbox.kompglobal.com/login | The user should be sent back to the console (a signed-in user must not be shown the login form again) |
+| B-23 | Signed-in admin opening /login: what the application shows | Signed in as admin, open https://sandbox.kompglobal.com/login | A readable page. Best: the admin is sent back to the console. If the login form is shown again it is only noted (the sign-in is still valid) |
 | B-24 | After signing out, browser Back does not show protected content | Signed in as admin on /clients, sign out via the profile menu, press the browser Back button | Login page (or a signed-out state); the Clients list is not shown |
 | B-25 | Refresh (F5) on the Clients page keeps the Clients page | Signed in as admin, open Clients from the sidebar, press F5 | The Clients page is shown again (not the dashboard / login) |
 | B-40 | An ACTIVE MSA does not offer 'Approve & Activate' again | Signed in as admin/EOR, MSA & Contract > MSA, search an ACTIVE client, click its status badge (Approve is never clicked) | The ACTIVE status label should not be clickable, or the window that opens should not offer 'Approve & Activate' |
@@ -442,9 +446,9 @@ are correct" instead of several cases that show the same page. When an existing 
 - **First login:** a 300-character password is accepted (P-23).
 - **Organization Details:** years in industry accepts -5 / abc / 1000 (O-02..O-04); pincode format is not validated (O-10..O-13); CIN and GSTIN format / length are not validated
   (O-21, O-22, O-24, O-25); an invalid website is refused only with a generic toast that does not name the field (O-06, O-07).
-- **Documents:** any file type, empty or fake files, a 21 MB file and a 180-character file name are accepted (D-01..D-08); Continue works with no documents (D-20, to be confirmed with the product team);
+- **Documents:** any file type, empty or fake files, a 21 MB file and a 180-character file name are accepted (D-01..D-08); (the two document boxes have no asterisk = optional, so Continue without documents is correct: case D-20 was removed);
   the document slots are empty after Back from step 2 (B-37); **the admin client profile shows both uploaded documents as "Not uploaded"** (TC-E2E-04).
-- **Access / session:** `/candidates` stays on a blank page for a client (B-15); `/login` is shown again to a signed-in client or admin (B-19, B-23); the admin deep link `/clients` lands on the dashboard (B-22).
+- **Access / session:** `/candidates` stays on a blank page for a client (B-15); (the login form shown again to a signed-in client or admin, B-19 / B-23, is only a note: the sign-in is still valid); the admin deep link `/clients` lands on the dashboard (B-22).
 - **Clients list:** the column sort only re-orders the 10 rows of the current page (X-55); the status tiles do not add up to Total because "Pending" has no tile (X-48, to be confirmed).
 - **API (seen in earlier executions, not re-runnable without a new client):** `POST msa-contract/api/status/` answers 404 while the MSA is generated (3 of 3 runs, the journey still completes);
   `GET notifications/push_api/user-notification/` answered 500 once (intermittent).
@@ -523,6 +527,8 @@ are correct" instead of several cases that show the same page. When an existing 
   (`-Dcases=<ID>`) to tell a flaky wait from an application bug; X-28, X-71 and B-01 were flaky waits, not findings.
 - The VS Code Java language server can show stale or invented errors (its copy of a file drifts after external edits). The truth is `mvn -q -DskipTests test-compile` (silent = clean).
   To clear the red marks: close and reopen the file, or run "Java: Clean Java Language Server Workspace" / "Developer: Reload Window". Do not "fix" code that Maven compiles cleanly.
+- **Mandatory = a field with an asterisk (*)** (user, 2026-11-08). A field without an asterisk may be left empty and the form may be continued (e.g. the CIN / GST document boxes); never write a case that expects a refusal for it. Check the asterisks on the live form before assuming a rule. A case whose app behaviour is only a design preference is a NOTE (passes), not a FAIL.
+- **A case's picture must show its evidence**: when the app accepts a bad value it moves to the next page and the step picture shows that next page, so cases with typed values take an extra picture of the form BEFORE Continue (`TestReporter.evidence(label, caption)`). Check that no two failed cases share the same picture.
 - Report wording (see the standing rule in section 2): a message of the application goes into a report in double quotes; a sentence about a form field uses the field's plain name ("Years in industry", not `years_in_industry`:
   `fieldLabel` / `contactFieldLabel` in the edge class); a comparison reads "should be \"X\" but the page shows \"Y\"" (`ValueChecks`); a check that finds nothing wrong still says what was seen ("10 clients are listed ...").
   `PlainText.simplify` must never touch case ids (it once turned "TC-E2E-02" into "TC-end-to-end-02": ids stay out of its term list) and never touches text inside double quotes.

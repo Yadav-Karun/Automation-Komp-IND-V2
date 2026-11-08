@@ -244,9 +244,14 @@ public final class TestReporter {
 
     /** Extra screenshot inside the current phase (e.g. second page of a long form). */
     public void evidence(String label) {
+        evidence(label, label.replace('_', ' '));
+    }
+
+    /** Extra screenshot with a plain caption ({@code label} only names the file). */
+    public void evidence(String label, String caption) {
         String shot = ScreenshotManager.capture(driver,
                 fileName(seq, "PASS") .replace("_PASS.png", "_" + (++evidenceCount) + "_" + label + "_PASS.png"), false);
-        node.info("Extra screenshot: " + esc(PlainText.simplify(label.replace('_', ' '))), media(shot));
+        node.info("Extra screenshot: " + esc(PlainText.simplify(caption)), media(shot));
     }
 
     /** Soft check: a genuine problem of the application that does not block the rest of the journey. Write {@code title} as a plain sentence. */

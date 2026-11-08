@@ -11,3 +11,8 @@ Voltron | - | the application says this name or e-mail already exists | 2026-11-
 Blue Lock | - | the application says this name or e-mail already exists | 2026-11-08 03:58:00 pm
 Clannad | tomoyaokazaki@yopmail.com | ClientOnboardingEdgeCases | 2026-11-08 03:58:05 pm
 Bungo Stray Dogs | atsushinakajima@yopmail.com | ClientOnboardingE2EHappyFlow | 2026-11-08 05:55:41 pm
+Assassination Classroom | - | the application says this name or e-mail already exists | 2026-11-08 06:07:10 pm
+Bleach | - | the application says this name or e-mail already exists | 2026-11-08 06:07:22 pm
+Shield Hero | naofumiiwatani@yopmail.com | ClientOnboardingEdgeCases | 2026-11-08 06:07:26 pm
+Fate Zero | - | the application says this name or e-mail already exists | 2026-11-08 07:10:51 pm
+Akame ga Kill | tatsumi@yopmail.com | ClientOnboardingEdgeCases | 2026-11-08 07:10:56 pm
