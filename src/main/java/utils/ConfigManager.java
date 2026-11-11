@@ -124,6 +124,15 @@ public final class ConfigManager {
         return v != null ? SecretMasker_register(v) : adminPassword();
     }
 
+    /** The AOR test user (Employee > AOR bulk upload, AOR Finance): <env>.aor.email / <env>.aor.password in config/secrets.local.properties. */
+    public static String aorEmail() {
+        return required(env() + ".aor.email");
+    }
+
+    public static String aorPassword() {
+        return secret(env() + ".aor.password");
+    }
+
     public static String clientPassword() {
         return secret("client.test.password");
     }

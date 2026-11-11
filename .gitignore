@@ -8,3 +8,12 @@ tools/classpath.txt
 .idea/
 .vscode/
 *.log
+
+# AOR identity pool (Aadhaar / PAN supplied by the QA owner)
+config/aor-identities.local.txt
+
+# local run data that must not be pushed (identity numbers, templates of the QA owner, employee registers, conversation dumps)
+conversation-*.txt
+testdata/aor-templates/
+testdata/aor-used-ids.txt
+testdata/aor-edge-employees.txt

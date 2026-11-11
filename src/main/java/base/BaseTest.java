@@ -52,6 +52,8 @@ public abstract class BaseTest {
     /** Test cases of this class (planned) and finished so far: shown in the bar of the browser ({@link RunBanner}). */
     private int plannedCases = -1; // counted just before the first case: the test class has decided by then which cases exist (e.g. a reused client has no first-login cases)
     private int finishedCases;
+    /** The list in the bar: {label, state} per planned case; the state is p / f / s / r / w (see {@link RunBanner}). */
+    private final java.util.List<String[]> board = new java.util.ArrayList<>();
     private long runStartMs = System.currentTimeMillis(); // the timer of the bar counts from here
 
     // ================================================================== lifecycle
@@ -91,6 +93,7 @@ public abstract class BaseTest {
         return switch (last) {
             case "client" -> ExecutionInfo.MODULE_CLIENT;
             case "project" -> "Project-Management";
+            case "aor" -> "Employee-AOR"; // tests.employee.aor
             default -> last.isEmpty() ? ExecutionInfo.MODULE_CLIENT : Character.toUpperCase(last.charAt(0)) + last.substring(1);
         };
     }
@@ -105,10 +108,13 @@ public abstract class BaseTest {
         if (plannedCases < 0) {
             plannedCases = countPlannedCases();
             Log.info("Test cases planned for this run: " + plannedCases);
-            RunBanner.update(driver, plannedCases, finishedCases, runStartMs);
+            buildBoard();
+            RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
         }
+        markRunning();
         if (driver != null && alive(driver)) {
             recoverFromNetworkLoss();
+            RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
             return;
         }
         Log.warn("The browser is gone (closed by hand or crashed). Starting a new one; admin / client sessions are lost and "
@@ -116,7 +122,7 @@ public abstract class BaseTest {
         DriverFactory.quit(driver);
         driver = DriverFactory.create();
         browserReady();
-        RunBanner.update(driver, plannedCases, finishedCases, runStartMs);
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
     }
 
     /**
@@ -168,9 +174,109 @@ public abstract class BaseTest {
         boolean notSelected = result.getThrowable() != null && "Not selected by -Dcases".equals(result.getThrowable().getMessage());
         if (!notSelected) {
             finishedCases++; // a case that -Dcases filtered out does not count as run
+            markFinished(result, r == null ? null : r.name());
         }
-        RunBanner.update(driver, plannedCases, finishedCases, runStartMs); // before the report file is written (that takes longer with every case): the bar must not lag
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board); // before the report file is written (that takes longer with every case): the bar must not lag
         ExtentManager.flush();
+    }
+
+    /** The list of the bar before the first case: with -Dcases the ids that were asked for, else every test method (a data-driven one once per row). */
+    private void buildBoard() {
+        board.clear();
+        try {
+            String filter = ConfigManager.get("cases");
+            if (filter != null) {
+                for (String id : filter.split(",")) {
+                    if (!id.isBlank()) {
+                        board.add(new String[] { id.trim(), "w" });
+                    }
+                }
+                return;
+            }
+            java.util.List<Method> methods = new java.util.ArrayList<>();
+            for (Method m : getClass().getMethods()) {
+                Test t = m.getAnnotation(Test.class);
+                if (t != null && t.enabled()) {
+                    methods.add(m);
+                }
+            }
+            methods.sort(java.util.Comparator.comparingInt((Method m) -> m.getAnnotation(Test.class).priority()).thenComparing(Method::getName));
+            for (Method m : methods) {
+                Test t = m.getAnnotation(Test.class);
+                String name = m.getName().replaceAll("([a-z0-9])([A-Z])", "$1 $2");
+                if (t.dataProvider().isEmpty()) {
+                    for (int i = 0; i < Math.max(1, t.invocationCount()); i++) {
+                        board.add(new String[] { name, "w" });
+                    }
+                } else {
+                    for (Object row : providerRowObjects(t.dataProvider())) {
+                        board.add(new String[] { name + " " + row, "w" });
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            // the list is a convenience: the counts still work
+        }
+    }
+
+    private java.util.List<Object> providerRowObjects(String name) {
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        for (Method p : getClass().getMethods()) {
+            DataProvider dp = p.getAnnotation(DataProvider.class);
+            if (dp != null && name.equals(dp.name().isEmpty() ? p.getName() : dp.name()) && p.getParameterCount() == 0) {
+                try {
+                    Object rows = p.invoke(this);
+                    java.util.Iterator<?> it = rows instanceof Object[] ? java.util.Arrays.asList((Object[]) rows).iterator()
+                            : rows instanceof java.util.Iterator ? (java.util.Iterator<?>) rows : null;
+                    while (it != null && it.hasNext()) {
+                        Object row = it.next();
+                        out.add(row instanceof Object[] && ((Object[]) row).length > 0 ? ((Object[]) row)[0] : row);
+                    }
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    out.add("");
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The first case that has not run yet is the one running now. */
+    private void markRunning() {
+        for (String[] c : board) {
+            if ("r".equals(c[1])) {
+                return;
+            }
+        }
+        for (String[] c : board) {
+            if ("w".equals(c[1])) {
+                c[1] = "r";
+                return;
+            }
+        }
+    }
+
+    private void markFinished(ITestResult result, String realName) {
+        String[] entry = null;
+        for (String[] c : board) {
+            if ("r".equals(c[1])) {
+                entry = c;
+                break;
+            }
+        }
+        if (entry == null) {
+            for (String[] c : board) {
+                if ("w".equals(c[1])) {
+                    entry = c;
+                    break;
+                }
+            }
+        }
+        if (entry != null) {
+            entry[1] = result.getStatus() == ITestResult.SUCCESS ? "p" : result.getStatus() == ITestResult.SKIP ? "s" : "f";
+            if (realName != null && !realName.isBlank()) {
+                entry[0] = realName;
+            }
+        }
     }
 
     /**

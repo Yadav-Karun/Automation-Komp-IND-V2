@@ -28,7 +28,7 @@ The **Project Management module** (projects of an existing client, AOR + EOR) li
   (polls every 10 s, `-Dnetwork.wait.max.seconds`, default 600; after one outage that never ended later waits are 30 s), goes on from a clean page and signs in again when a case needs a session.
   (Seen: a 13-second outage made 35 cases fail and 85 more skip for 13 minutes because the suite kept clicking on the error page.)
 - Run with the browser VISIBLE and maximized (no `-DHeadless=true` unless asked). Long runs may use the harness' background-task mechanism, the browser is still visible.
-- Use ONLY `@yopmail.com` addresses wherever an e-mail is needed.
+- Use ONLY `@yopmail.com` addresses wherever an e-mail is needed (user, 2026-11-11: a deliberately MALFORMED address in a negative case - "plainaddress", "user@@yopmail.com" - is fine; every well-formed address must be @yopmail.com).
 - **Client names are ANIME names** for the two clients the tests create (110 anime in `utils/ClientNames`, each with 4 characters):
   client (legal entity) name = the anime ("Dragon Ball Z"); contact person at registration = its MAIN CHARACTER ("Son Goku") with e-mail = name in lower case + `@yopmail.com`
   (`songoku@yopmail.com`, also the client's login address); Business / Finance / HR contacts of the wizard = three other characters of the same anime ("Vegeta" `vegeta@yopmail.com`, "Son Gohan", "Piccolo").
@@ -609,3 +609,45 @@ required", "Reference ID format is required"; an empty start date shows only "In
 Ensure this field has no more than 200 characters." + "Could not create the project."): name 200, code 50, reference id 50. The code is unique per type and case-sensitive ("Project code: aor project with
 this project code already exists."); project names and reference ids may repeat (see the findings). Whether a project whose end date is over leaves "Active" is checked by P04 / Z01 (in the first
 exploratory run every project, also one that ended on 31 Dec 2022, was listed as Active).
+
+## 11. Employee - AOR onboarding and finance (`tests.employee.aor`) - happy flow only
+
+Folder `src/test/java/tests/employee/aor/`, class `AorOnboardingAndFinance` (the spec name "AOR-OnboardingAndFinanace.java" is not a valid Java name), suite `testng-aor-onboarding-finance.xml`, module tag `Employee-AOR`,
+reports `reports/AorOnboardingAndFinance/<run>/` (+ `uploads/` with the filled workbooks, `aor-run-data.json`). **Two cases in order: TC-AOR-01 = employee bulk upload, TC-AOR-02 = AOR Finance for the same employees**
+(skipped when TC-AOR-01 did not upload). No edge cases yet (user: "just create happy flow for now").
+```bash
+mvn clean test -Dsuite=testng-aor-onboarding-finance.xml                       # 5 new employees (-Daor.employees=N, 1..10), ~3 min
+mvn clean test -Dsuite=testng-aor-onboarding-finance.xml -Dcases=TC-AOR-02 -Daor.run.data=reports/AorOnboardingAndFinance/<run>/aor-run-data.json [-Daor.session.reuse=true]   # finance again, no new employees
+```
+- **Login:** `sandbox.aor.email / sandbox.aor.password` in `config/secrets.local.properties` (never in code or reports). Workbooks (only COPIED, originals untouched): `aorBulkUploadExcelPath`, `aorPayeeSheetExcelPath` in
+  `config/documents.properties` = `...\Bulk Upload\AOR\AOR - Bulk Upload.xlsx` and `AOR Payroll - Calculation.xlsx` (the path in the spec lacked the `\AOR\` folder). Aadhaar / PAN: only the 20 pairs the user supplied
+  (`config/aor-identities.local.txt`, git-ignored, round-robin, masked in reports). Employee / DP ids / names are never reused: `testdata/aor-used-ids.txt` (`AorRunHistory`).
+- **Data rules** (all checked in the file that was really written, TC-AOR-01 step 4): client "Bleach", project "The Substitute Shinigami" (sheet "Bleach", other sheets and unused rows are removed from the copy), random state + its capital as hub,
+  Hub Name = capital + "-" + Company Employee Id, Name As Per Company = Dp Name = Name, Marge Name = "AOR-" + Name, onboarding before 1 Jan 2025, joining before 1 Jan 2024, age >= 18, e-mail `<NameNoSpaces>.BTSS@yopmail.com`
+  (pattern of the owner's example sheet), manager "Karun Yadav", Area Manager e-mail `Karun.Yadav.AOR@yopmail.com`, one Area Manager + Supervisor name per run, prefilled template values kept.
+- **Spec vs. example workbooks:** the Payee Sheet column "Wm Name" gets the employee's NAME (the owner's example sheets and the payroll list's AGENT NAME do), not the Company Employee Id of the written spec (`-Daor.payee.wmname=employeeId`
+  switches). Final Payout is a number. Run date = today, used for every date (pay period start = end = run date).
+- **Live facts (sandbox 2026-11-10):** Employees > AOR (`/aor-employees`, "AOR Agents"; the list shows the Delivery Partner Id; search by name / id). Bulk Upload window -> after Upload a SECOND, floating panel
+  ("Creating Bulk Employees ... Bulk onboard completed! 2 created, 0 updated") is a plain `div.fixed` under body, not a dialog: `AorDialog` follows it until "completed". Same for the Payee Sheet ("Uploading Payout Sheet ... Records - Total, Created,
+  Updated" or "Errors (n) ... FHRID ... is not onboarded for this client/project"). AOR Financials: Payroll (`/financials/aor/payroll`: Upload Pay Sheet, Download Bank Sheet, Download DA Invoices, Generate Invoice, Refresh Report,
+  Download Report) and Invoices. Payroll list column "EMPLOYEE ID" = the Delivery Partner Id (FHR id). Session ids `PAYIN-<ddMMyy><ddMMyy>-<nnnn>`. Downloads go to `~/Downloads/AOR` (CDP download behaviour), renamed `<runId>_<purpose>_<name>`;
+  a download of an existing name overwrites it, so "new" means new OR changed.
+- **Rules learned:** verify what a dropdown SHOWS after choosing (a click in the long project list picked "QA AOR Project"; `AorDialog.choose` retries); never Ctrl+A in a date box (it selects the whole page); after a Payee Sheet upload reload the
+  Payroll page before the next windows (they offered only the old sessions); the invoice groups several states under one entry (Gujarat + Kerala + Meghalaya under "Maharashtra"): only the TOTAL is compared, as agreed.
+- **Added 2026-11-11 (AOR):** TC-AOR-01 step AOR-08 opens every new employee (Action > View) and checks the header + the five tabs (Basic Details, Personal Info, Agent Bank Details, Identification Information, Area Manager/Supervisor) one after the other.
+  TC-AOR-02 now ends with the PAYROLL tab per-employee invoices (View + PDF into Downloads/AOR, no grand total) and the INVOICE tab (Refresh Report, every invoice of the session via Action > View > Download, Download Report with State = "All ...", combined state-wise total vs the Payee Sheet total, difference 0),
+  then the DELETE checks (user's explicit permission 2026-11-11, only sessions created by the run, exact session id + employees verified before the click): delete session 1 on the Payroll tab (must also vanish from the Invoice tab), upload a second Payee Sheet + invoice,
+  delete session 2 on the Invoice tab (must also vanish from Payroll); other sessions must stay unchanged. Lists are read only after the table settled and compared with the "of N" total.
+  Progress box: the list of test cases is collapsed by default (arrow in the box); a JavaScript error in `RunBanner.JS` is swallowed silently (the box just disappears) - test the script in a browser after editing it.
+- **AOR rules of 2026-11-11 (user):** (1) the onboarding workbook is filled ONLY in these columns: State, Delivery Partner Id, Company Employee Id, Name, Name As Per Company, Marge Name, Dp Name As Per Company, Contact Number, Father Name,
+  Date Of Onboarding, Hub Location, Hub Name, Da Status, Date Of Joining, Date Of Birth, Personal Email Id, Aadhar Number, Pan Number, Account Number, Ifsc Code, Driving Licence Number, Vehicle Insurance - Address, Bank Name, Manager,
+  Area Manager and Supervisor keep the TEMPLATE's own values (the Bleach sheet has 30 prefilled rows). (2) Aadhaar / PAN: only the pairs of `config/aor-identities.local.txt` (44 valid pairs; pair 24 left out: Greek look-alike letters in its PAN);
+  pairs no employee used yet come first (`AorDataGenerator.pickPairs`, booked as kind AADHAAR in `testdata/aor-used-ids.txt`). (3) LIMITS: happy flow 5 employees per run; edge cases NO LIMIT (user, 2026-11-11: the Aadhaar / PAN pairs supplied are the only supply, unused pairs first, then the list is used again;
+  `testdata/aor-edge-employees.txt` only counts; `-Daor.edge.employees.max` can set one); a failed / refused upload creates nobody anyway. REPORTS: a class report lists EVERY scenario and case of the class - one that is not run (filter, missing base) is a SKIP row with the reason. (4) Four files in `C:\Testing\KOMP IND - Automation File\Bulk Upload\AOR` hold the data of the latest run until the next run replaces it:
+  `AOR - Bulk Upload.xlsx` + `AOR Payroll - Calculation.xlsx` (happy flow) and the two `...EdgeCases.xlsx` (edge cases). The PRISTINE templates are the copies in `testdata/aor-templates/` (`aorBulkUploadTemplatePath`, `aorPayeeSheetTemplatePath`): only read.
+  (5) Edge class `AorEdgeCases` (suite `testng-aor-edge-cases.xml`, TC-AOR-EDGE-01 bulk upload, TC-AOR-EDGE-02 Payee Sheet): see its Javadoc; scenario workbooks are kept in the run folder `uploads/`.
+- **Lessons 2026-11-11 (edge workbooks / progress box):** (1) a workbook is written to a `.part` file and only a FINISHED one replaces the target (`AorWorkbooks.writeEmployeeWorkbook/writePayeeWorkbook`): the old R00 copied the template over the retained
+  edge workbook first and then failed on an accepted date written as text ("11-Nov-2031"), which left the file empty. (2) The edge workbook keeps rows exactly as they were uploaded (`writeRawRows`, rows of the file + this run's `uploads/`), never rebuilt from objects
+  (the old rebuild applied the "changes" of a duplicate-id scenario and put another employee's delivery partner id into a saved row). (3) The progress box must be REGISTERED for new pages before it is drawn: the first update runs on `chrome://new-tab-page`, which refuses scripts,
+  and the exception skipped the registration, so the box was missing for the whole first case; `RunBanner.ensure()` also redraws it before every step. (4) Dates of rows beyond the template's prefilled rows get a date format (else they read back as serial numbers).
+- **Findings so far:** (1) CONFIRMED 2026-11-11 (user: keep it failing): the Bank Sheet of ONE payroll session also lists the payees of OTHER sessions of the same date (10 rows instead of 5, in TC-AOR-02 step 6 and again with two sessions of the run on the same date); the sheet amounts are the final payout less 1% (to be confirmed with the client); (2) after a Payee Sheet upload the next windows do not offer the new session until the page is reloaded.

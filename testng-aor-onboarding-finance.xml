@@ -1,0 +1,14 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- EMPLOYEE - AOR ONBOARDING AND FINANCE, HAPPY FLOW (positive path only). One test class = one report folder named after the class.
+     TC-AOR-01 uploads new AOR employees with the bulk-upload workbook; TC-AOR-02 (needs TC-AOR-01) runs AOR Finance for the same employees:
+     Payee Sheet, Bank Sheet, DA Invoices, Generate Invoice, payroll report, invoice check.
+     Creates 5 new employees per run (-Daor.employees=N, 1 to 10); they cannot be deleted by automation.
+     Run:  mvn clean test -Dsuite=testng-aor-onboarding-finance.xml
+     Finance part again on the employees of an earlier run:  add -Daor.run.data=reports/AorOnboardingAndFinance/&lt;run folder&gt;/aor-run-data.json -->
+<suite name="KOMP IND Testing - Employee AOR" verbose="1" parallel="none">
+    <test name="AOR Employee Onboarding and AOR Finance (happy flow)">
+        <classes>
+            <class name="tests.employee.aor.AorOnboardingAndFinance"/>
+        </classes>
+    </test>
+</suite>

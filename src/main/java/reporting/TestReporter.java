@@ -74,6 +74,11 @@ public final class TestReporter {
     private TestReporter previous;
     private boolean finished;
 
+    /** "ID - title" of this case (for the list in the progress bar). */
+    public String name() {
+        return testName;
+    }
+
     private TestReporter(WebDriver driver, ExtentTest test, ClientData data) {
         this.driver = driver;
         this.test = test;
@@ -135,6 +140,7 @@ public final class TestReporter {
         node = test.createNode(plain(String.format("Step %d - %s", idx, PlainText.simplify(title))));
         Log.info(String.format("Phase %02d START - %s", idx, title));
         NetworkCapture.drain(driver); // discard anything before this phase
+        RunBanner.ensure(driver); // the progress box is on the screen for the person who watches the run
         carried.clear();
         int defectsBefore = defects.size();
         phaseDefectShot = null;
