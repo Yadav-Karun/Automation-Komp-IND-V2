@@ -52,6 +52,7 @@ public abstract class BaseTest {
     /** Test cases of this class (planned) and finished so far: shown in the bar of the browser ({@link RunBanner}). */
     private int plannedCases = -1; // counted just before the first case: the test class has decided by then which cases exist (e.g. a reused client has no first-login cases)
     private int finishedCases;
+    private boolean scenarioMode;
     /** The list in the bar: {label, state} per planned case; the state is p / f / s / r / w (see {@link RunBanner}). */
     private final java.util.List<String[]> board = new java.util.ArrayList<>();
     private long runStartMs = System.currentTimeMillis(); // the timer of the bar counts from here
@@ -68,6 +69,8 @@ public abstract class BaseTest {
             PlainText.resetWordingNotes();
             Log.init(ExecutionInfo.logs().resolve("execution.log"));
             ExtentManager.get();
+            reporting.ScenarioBoard.reset();
+            reporting.ScenarioBoard.openOverallSummary(); // the first entry of every report
             Log.info("Report folder " + ExecutionInfo.id() + " | env=" + ConfigManager.env() + " | " + ConfigManager.baseUrl());
             driver = DriverFactory.create();
             Log.info("Browser: " + DriverFactory.browserVersion(driver) + " | OS: " + System.getProperty("os.name"));
@@ -106,12 +109,22 @@ public abstract class BaseTest {
     @BeforeMethod(alwaysRun = true)
     public void ensureBrowserAlive() {
         if (plannedCases < 0) {
-            plannedCases = countPlannedCases();
-            Log.info("Test cases planned for this run: " + plannedCases);
-            buildBoard();
+            List<String> scenarios = plannedScenarios();
+            if (scenarios != null && !scenarios.isEmpty()) {
+                scenarioMode = true; // a class of independent scenarios: the bar counts and lists SCENARIOS, not test methods
+                plannedCases = scenarios.size();
+                board.clear();
+                scenarios.forEach(label -> board.add(new String[] { label, "w" }));
+            } else {
+                plannedCases = countPlannedCases();
+                buildBoard();
+            }
+            Log.info((scenarioMode ? "Scenarios planned for this run: " : "Test cases planned for this run: ") + plannedCases);
             RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
         }
-        markRunning();
+        if (!scenarioMode) {
+            markRunning();
+        }
         if (driver != null && alive(driver)) {
             recoverFromNetworkLoss();
             RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
@@ -173,11 +186,52 @@ public abstract class BaseTest {
         }
         boolean notSelected = result.getThrowable() != null && "Not selected by -Dcases".equals(result.getThrowable().getMessage());
         if (!notSelected) {
-            finishedCases++; // a case that -Dcases filtered out does not count as run
-            markFinished(result, r == null ? null : r.name());
+            if (!scenarioMode) {
+                finishedCases++; // a case that -Dcases filtered out does not count as run
+                markFinished(result, r == null ? null : r.name());
+            }
         }
         RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board); // before the report file is written (that takes longer with every case): the bar must not lag
         ExtentManager.flush();
+    }
+
+    /** A class of independent scenarios returns the label of every scenario ("TC | id | title") before the first one runs: the progress box then counts scenarios. Null = one entry per test method. */
+    protected List<String> plannedScenarios() {
+        return null;
+    }
+
+    /** Called when the class ends, before the report is written: the place to fill the summary entries. */
+    protected void beforeReportClosed() {
+        // nothing by default
+    }
+
+    /** A scenario starts (the label starts with {@code prefix}, e.g. "TC-AOR-EDGE-01 | W04"): its line in the progress box is highlighted. */
+    protected void scenarioStarted(String prefix) {
+        if (!scenarioMode) {
+            return;
+        }
+        for (String[] c : board) {
+            if ("w".equals(c[1]) && c[0].startsWith(prefix)) {
+                c[1] = "r";
+                break;
+            }
+        }
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
+    }
+
+    /** A scenario ended; {@code state}: p = passed, f = failed, s = not run / blocked / not judged. */
+    protected void scenarioFinished(String prefix, String state) {
+        if (!scenarioMode) {
+            return;
+        }
+        for (String[] c : board) {
+            if ("r".equals(c[1]) && c[0].startsWith(prefix)) {
+                c[1] = state;
+                break;
+            }
+        }
+        finishedCases++;
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
     }
 
     /** The list of the bar before the first case: with -Dcases the ids that were asked for, else every test method (a data-driven one once per row). */
@@ -329,6 +383,12 @@ public abstract class BaseTest {
 
     @AfterClass(alwaysRun = true)
     public void finishClass() {
+        try {
+            beforeReportClosed();
+            reporting.ScenarioBoard.closeOverallSummary();
+        } catch (RuntimeException e) {
+            Log.warn("The summaries of the report could not be written: " + e.getMessage());
+        }
         DriverFactory.quit(driver);
         driver = null;
         if (ExecutionInfo.root() == null) {

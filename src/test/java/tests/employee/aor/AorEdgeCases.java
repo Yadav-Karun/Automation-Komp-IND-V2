@@ -32,6 +32,8 @@ import pages.AorDialog;
 import pages.AorPayrollPage;
 import pages.LoginPage;
 import reporting.ExecutionInfo;
+import reporting.ScenarioBoard;
+import reporting.ExtentManager;
 import reporting.TestReporter;
 import utils.AorDataGenerator;
 import utils.AorEdgeRegistry;
@@ -151,13 +153,11 @@ public class AorEdgeCases extends BaseTest {
     // and duplicates inside one file. The application must refuse every wrong row and name the wrong column; whoever it wrongly accepts is booked against the limit of 5.
     @Test(priority = 1)
     public void tc03_bulkUploadEdgeCases() throws Exception {
-        tc = "TC-AOR-EDGE-01";
-        skipCaseIfNotSelected("TC-AOR-EDGE-01", G_BULK, "AOR bulk upload: wrong, missing and duplicate employee data is refused and the wrong column is named");
-        rep = TestReporter.start(tc, G_BULK, "AOR bulk upload: wrong, missing and duplicate employee data is refused and the wrong column is named",
-                "Negative and edge cases of the employee bulk upload (the workbook of the QA owner, several wrong values per row). At most 5 employees are created for the edge cases in all runs together.",
-                "The edge-case copy of the bulk-upload workbook; rows with wrong values; files that cannot be used",
-                "Every wrong row is refused with a message that names the wrong column and creates no employee; the valid base employees exist", driver, holder(), this::headline);
-        try {
+        runCase("TC-AOR-EDGE-01", "AOR bulk upload: wrong, missing and duplicate employee data is refused and the wrong column is named", () -> { }, this::defineEdge01);
+    }
+
+    /** The scenarios of TC-AOR-EDGE-01 in run order. Only scenario calls live here (the method is also run once without a browser to list the scenarios). */
+    private void defineEdge01() {
             step("S00", "Sign in as the AOR user", "The login succeeds and the start page of the AOR user is shown", this::signIn);
             step("B00", "The valid base employees exist (re-used from the edge workbook, or onboarded now)", "At least " + base() + " valid employees are onboarded", this::ensureBase);
 
@@ -268,10 +268,10 @@ public class AorEdgeCases extends BaseTest {
             single("S09", "Country other than India", "country", x -> m("country", "US"));
             single("S10", "Delivery status that does not exist", "status", x -> m("da status", "Maybe"));
             single("S11", "Contact number of letters (valid otherwise)", "contact", x -> m("contact number", "abcdefghij"));
-            single("S12", "E-mail address of an onboarded employee", "email|e-mail", x -> m("personal email id", run == null ? "x@yopmail.com" : run.employees.get(run.employees.size() - 1).personalEmail));
-            single("S13", "Contact number of an onboarded employee", "contact", x -> m("contact number", run == null ? "9999999999" : run.employees.get(run.employees.size() - 1).contactNumber));
-            single("S14", "Bank account number of an onboarded employee", "account", x -> m("account number", run == null ? "9999999999" : run.employees.get(run.employees.size() - 1).accountNumber));
-            single("S15", "Delivery partner id of an onboarded employee", "fhrid|delivery partner|already assigned", x -> m("delivery partner id", run == null ? "DPA-000000" : run.employees.get(run.employees.size() - 1).deliveryPartnerId));
+            single("S12", "E-mail address of an onboarded employee", "email|e-mail", x -> m("personal email id", run == null ? "x@yopmail.com" : run.employees.get(0).personalEmail));
+            single("S13", "Contact number of an onboarded employee", "contact", x -> m("contact number", run == null ? "9999999999" : run.employees.get(0).contactNumber));
+            single("S14", "Bank account number of an onboarded employee", "account", x -> m("account number", run == null ? "9999999999" : run.employees.get(0).accountNumber));
+            single("S15", "Delivery partner id of an onboarded employee", "fhrid|delivery partner|already assigned", x -> m("delivery partner id", run == null ? "DPA-000000" : run.employees.get(0).deliveryPartnerId));
 
             // =============================================== several rows in one file
             step("M01", "Valid, invalid, valid: are the valid rows processed when another row fails?", "The invalid row is refused and named; what happens to the valid rows is recorded", this::mixedRows);
@@ -294,25 +294,6 @@ public class AorEdgeCases extends BaseTest {
                 retainBulk();
                 return "The file \"" + bulkEdge() + "\" now holds " + PlainText.count(onboarded.size(), "employee", "employees") + ": " + names();
             });
-            if (!skippedForLimit.isEmpty()) {
-                rep.note("Not run because the limit of " + budget.limit() + " employees is reached (" + budget + "): " + String.join(", ", skippedForLimit)
-                        + ". The register of the employees is testdata/aor-edge-employees.txt.");
-            }
-        } finally {
-            Log.info("AOR edge cases (bulk upload): " + budget + ", scenarios run " + ran);
-        }
-        assertNoDefects(rep);
-    }
-
-    /** A case that -Dcases leaves out still has its row in the report (as "not run"), so the report always shows every case of the class. */
-    private void skipCaseIfNotSelected(String id, String group, String title) {
-        if (isSelected(id)) {
-            return;
-        }
-        TestReporter skipped = TestReporter.start(id, group, title, "Edge and negative cases of the AOR employee module", "-", "See the case when it is run", driver, holder(), this::headline);
-        SkipException skip = new SkipException("Not run in this run: -Dcases does not list " + id + ". It runs in a full run of the suite.");
-        skipped.finish("SKIP", skip);
-        throw skip;
     }
 
     private static int base() {
@@ -960,47 +941,46 @@ public class AorEdgeCases extends BaseTest {
     // row, and last a valid baseline sheet. Every wrong sheet must be refused with a clear message; a sheet that is wrongly accepted creates a payroll session, which is limited.
     @Test(priority = 2)
     public void tc04_payeeSheetEdgeCases() throws Exception {
-        tc = "TC-AOR-EDGE-02";
-        skipCaseIfNotSelected("TC-AOR-EDGE-02", G_PAY, "AOR Payee Sheet: wrong, missing and duplicate payout rows are refused with a clear message");
-        rep = TestReporter.start(tc, G_PAY, "AOR Payee Sheet: wrong, missing and duplicate payout rows are refused with a clear message",
-                "Negative and edge cases of the Payee Sheet upload (payroll calculation) for the base employees of the edge cases.",
-                "The edge-case copy of the Payee Sheet, one payout row with exactly one thing wrong per upload",
-                "Every wrong sheet is refused with a message that says what is wrong and creates no payroll entry", driver, holder(), this::headline);
-        loadEarlierEdgeRun();
-        if (run == null) {
-            loadBaseFromFile();
-        }
-        if (run == null) {
-            borrowFromHappyFlow();
-        }
-        if (run == null) {
-            SkipException skip = new SkipException("There are no base employees: run TC-AOR-EDGE-01 first (it onboards or re-uses them).");
-            rep.finish("SKIP", skip);
-            throw skip;
-        }
-        try {
+        runCase("TC-AOR-EDGE-02", "AOR Payee Sheet: wrong, missing and duplicate payout rows are refused with a clear message", () -> {
+            try {
+                loadEarlierEdgeRun();
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+            if (run == null) {
+                loadBaseFromFile();
+            }
+            if (run == null) {
+                borrowFromHappyFlow();
+            }
+            if (run == null) {
+                blockReason = "There are no base employees: run TC-AOR-EDGE-01 first (it onboards or re-uses them).";
+            }
+        }, this::defineEdge02);
+    }
+
+    /** The scenarios of TC-AOR-EDGE-02 in run order (only scenario calls: see defineEdge01). */
+    private void defineEdge02() {
             step("S00", "Sign in as the AOR user", "The login succeeds and the start page of the AOR user is shown", this::signIn);
-            step("B01", "Only base employees that still exist as uploaded are used (a row of TC-AOR-EDGE-01 may have changed one)", "At least one base employee is as uploaded", this::keepIntactBase);
-            AorRun one = view(run, 1);
-            LocalDate today = LocalDate.now();
+            step("B01", "Only base employees that still exist as uploaded are used (a row of TC-AOR-EDGE-01 may have changed view(run, 1))", "At least view(run, 1) base employee is as uploaded", this::keepIntactBase);
 
             step("P01", "Upload clicked without choosing a file", "The application should not accept it and should say that a file is needed", () ->
-                    judgePayee(uploadPayee(null, "Bleach", "The Substitute Shinigami", today, today)));
+                    judgePayee(uploadPayee(null, "Bleach", "The Substitute Shinigami", LocalDate.now(), LocalDate.now())));
             step("P02", "Payee Sheet uploaded without choosing the client", "The application should not accept it", () -> {
-                AorWorkbooks.writePayeeWorkbook(one, payFile());
-                return judgePayee(uploadPayee(payFile(), null, null, today, today));
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), null, null, LocalDate.now(), LocalDate.now()));
             });
             step("P03", "Payee Sheet uploaded without choosing the project", "The application should not accept it", () -> {
-                AorWorkbooks.writePayeeWorkbook(one, payFile());
-                return judgePayee(uploadPayee(payFile(), "Bleach", null, today, today));
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", null, LocalDate.now(), LocalDate.now()));
             });
             step("P04", "Pay period that ends before it starts", "The application should not accept it", () -> {
-                AorWorkbooks.writePayeeWorkbook(one, payFile());
-                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", today, today.minusDays(5)));
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.now(), LocalDate.now().minusDays(5)));
             });
             step("P05", "Pay period in the future", "The application should not accept a pay period that has not started", () -> {
-                AorWorkbooks.writePayeeWorkbook(one, payFile());
-                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", today.plusDays(30), today.plusDays(30)));
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.now().plusDays(30), LocalDate.now().plusDays(30)));
             });
 
             payeeFile("W01", "A Payee Sheet with the column headings only (no row)", () -> {
@@ -1024,7 +1004,7 @@ public class AorEdgeCases extends BaseTest {
             payeeRow("Q13", "Delivery hub left empty", m("delivery_hub", null));
             payeeRow("Q14", "Delivery hub that is not the hub of the employee", m("delivery_hub", "Nowhere-0000"));
             payeeRow("Q15", "Remark of 1000 characters", m("remark", "R".repeat(1000)));
-            step("Q16", "The same employee in two rows of one sheet", "The application should take the employee once and refuse the repeated row, or refuse the sheet, with a message", () -> {
+            step("Q16", "The same employee in two rows of view(run, 1) sheet", "The application should take the employee once and refuse the repeated row, or refuse the sheet, with a message", () -> {
                 if (sessions >= sessionLimit) {
                     throw new SkipException("Not run: the limit of " + sessionLimit + " payroll sessions is reached.");
                 }
@@ -1032,13 +1012,13 @@ public class AorEdgeCases extends BaseTest {
                 AorEmployee e = v.employees.get(0);
                 Map<String, String> again = m("state", e.state, "fhrid", e.deliveryPartnerId, "wm name", e.name, "final payout", String.valueOf(e.finalPayout + 1), "delivery_hub", e.hubName);
                 AorWorkbooks.writePayeeWorkbookWith(v, payFile(), List.of(), List.of(again));
-                AorDialog.Answer a = uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", today, today);
+                AorDialog.Answer a = uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.now(), LocalDate.now());
                 int created = Math.max(0, AorDialog.numberBefore(a.everything(), "created"));
                 if (created > 0) {
                     sessions++;
                 }
                 if (created > 1) {
-                    rep.defect("The same employee was paid twice in one sheet", "The repeated row is refused", a.describe());
+                    rep.defect("The same employee was paid twice in view(run, 1) sheet", "The repeated row is refused", a.describe());
                 } else if (created == 0 && !AorDialog.tellsOfProblem(a.everything())) {
                     rep.defect("The application did not say why nothing was created", "A message that says what is wrong", a.describe());
                 }
@@ -1055,7 +1035,7 @@ public class AorEdgeCases extends BaseTest {
                     throw new SkipException("The limit of " + sessionLimit + " payroll sessions of this run is reached.");
                 }
                 AorWorkbooks.writePayeeWorkbook(run, payFile());
-                AorDialog.Answer a = uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", today, today);
+                AorDialog.Answer a = uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.now(), LocalDate.now());
                 int created = AorDialog.numberBefore(a.everything(), "created");
                 int updated = AorDialog.numberBefore(a.everything(), "updated");
                 if (created + Math.max(updated, 0) != run.employees.size()) {
@@ -1070,10 +1050,6 @@ public class AorEdgeCases extends BaseTest {
                 return "The file \"" + bulkEdge().getFileName() + "\" holds the rows of the onboarded employees as they were uploaded; "
                         + (paid ? "the file \"" + payEdge().getFileName() + "\" holds the valid Payee Sheet of this run." : "the Payee Sheet file was left as it was (the valid sheet was not uploaded in this run).");
             });
-        } finally {
-            Log.info("AOR edge cases (Payee Sheet): payroll sessions " + sessions + " of " + sessionLimit + ", scenarios run " + ran);
-        }
-        assertNoDefects(rep);
     }
 
     // =================================================================================================================================== scenario plumbing
@@ -1096,56 +1072,219 @@ public class AorEdgeCases extends BaseTest {
     }
 
     private boolean selected(String id) {
+        if (!tcSelected) {
+            return false;
+        }
         String only = ConfigManager.get("aor.edge.only"); // -Daor.edge.only=U2,Q05: only these scenarios (sign-in, base employees and the closing step always run)
         return only == null || List.of("S00", "B00").contains(id) || ("R00".equals(id) && "true".equalsIgnoreCase(ConfigManager.get("aor.edge.retain"))) || java.util.Arrays.stream(only.split(",")).anyMatch(x -> x.trim().equalsIgnoreCase(id));
     }
 
-    /** One scenario = one report step; a failing scenario is recorded and the next one goes on. */
+    // ------------------------------------------------------------------ the reporting standard: every scenario is ONE report entry (left panel) with its own verdict and evidence
+
+    @FunctionalInterface
+    private interface ScenarioRunner {
+        void run(TestReporter r, boolean chosen) throws Throwable;
+    }
+
+    private boolean tcSelected = true;
+    private boolean planning;
+    private final List<String> plannedLabels = new ArrayList<>();
+    private String blockReason;
+
+    /** What the application said it created / updated (for the "record impact" line of the scenario). */
+    private void countImpact(AorDialog.Answer a) {
+        impactCreated += Math.max(0, AorDialog.numberBefore(a.everything(), "created"));
+        impactUpdated += Math.max(0, AorDialog.numberBefore(a.everything(), "updated"));
+    }
+    private boolean notJudged;
+    private int impactCreated;
+    private int impactUpdated;
+    private String impactWhat = "employees";
+    private com.aventstack.extentreports.ExtentTest tcSummary;
+
+    private String notRunReason() {
+        return tcSelected ? "Not selected for this run (-Daor.edge.only): the scenario is part of the class and runs in a full run."
+                : "Not run in this run: -Dcases does not list " + tc + ". The scenario runs in a full run of the suite.";
+    }
+
+    /** One scenario = one report entry. A finding is a red entry, the next scenario goes on. */
     private boolean step(String id, String title, String expected, TestReporter.PhaseAction body) {
-        boolean chosen = selected(id);
-        if (chosen) {
-            ran++;
-        }
-        currentId = id;
-        int before = rep.defects().size();
-        try {
-            rep.phase(idSlug(tc) + "_" + idSlug(id), id + " | " + title, expected, chosen ? body : () -> {
-                throw new SkipException("Not selected for this run (-Daor.edge.only): the scenario is part of the class and runs in a full run.");
-            });
-        } catch (SkipException e) {
-            if (String.valueOf(e.getMessage()).contains("network connection")) {
-                throw e;
-            }
-            return false;
-        } catch (Throwable t) {
-            failures.add(id + ": " + String.valueOf(t.getMessage()).split("\\R")[0]);
-            return false;
-        }
-        return rep.defects().size() == before;
+        return scenario(id, title, expected, (r, chosen) -> r.phase(idSlug(tc) + "_" + idSlug(id), id + " | " + title, expected, chosen && blockReason == null ? body : () -> {
+            throw new SkipException(chosen ? "Not run: " + blockReason : notRunReason());
+        }));
     }
 
     /** A scenario that is one table of values (the report shows which values are wrong and which are right). */
     private boolean stepChecks(String id, String title, String expected, TestReporter.CheckAction body) {
+        return scenario(id, title, expected, (r, chosen) -> r.phaseChecks(idSlug(tc) + "_" + idSlug(id), id + " | " + title, expected, chosen && blockReason == null ? body : c -> {
+            throw new SkipException(chosen ? "Not run: " + blockReason : notRunReason());
+        }));
+    }
+
+    private boolean scenario(String id, String title, String expected, ScenarioRunner runner) {
+        if (planning) {
+            plannedLabels.add(tc + " | " + id + " | " + title);
+            return true;
+        }
         boolean chosen = selected(id);
         if (chosen) {
             ran++;
         }
         currentId = id;
-        int before = rep.defects().size();
+        String label = tc + " | " + id;
+        scenarioStarted(label);
+        notJudged = false;
+        impactCreated = 0;
+        impactUpdated = 0;
+        impactWhat = tc.endsWith("02") ? "payroll entries" : "employees";
+        TestReporter r = TestReporter.startScenario(tc, id, tagsFor(tc, id), title, "What is checked: " + title, "Input of this scenario: " + title + ". The uploaded workbook, if the scenario uploads one, is linked in the evidence block at the end of this entry.",
+                expected, driver, holder(), this::headline);
+        r.captureFullApi();
+        rep = r;
+        Throwable error = null;
+        SkipException skip = null;
         try {
-            rep.phaseChecks(idSlug(tc) + "_" + idSlug(id), id + " | " + title, expected, chosen ? body : c -> {
-                throw new SkipException("Not selected for this run (-Daor.edge.only): the scenario is part of the class and runs in a full run.");
-            });
+            runner.run(r, chosen);
         } catch (SkipException e) {
-            if (String.valueOf(e.getMessage()).contains("network connection")) {
-                throw e;
-            }
-            return false;
+            skip = e;
         } catch (Throwable t) {
+            error = t;
             failures.add(id + ": " + String.valueOf(t.getMessage()).split("\\R")[0]);
-            return false;
         }
-        return rep.defects().size() == before;
+        ScenarioBoard.Verdict v;
+        ScenarioBoard.Kind kind = ScenarioBoard.Kind.NONE;
+        List<String> refs = List.of();
+        String reason;
+        int found = r.defects().size();
+        if (skip != null) {
+            String msg = String.valueOf(skip.getMessage());
+            v = msg.contains("network connection") || msg.contains("limit") || msg.contains("no base employees") || msg.contains("not onboarded") || msg.startsWith("Not run: ")
+                    ? ScenarioBoard.Verdict.BLOCKED : ScenarioBoard.Verdict.NOT_RUN;
+            reason = msg;
+        } else if (error != null) {
+            v = ScenarioBoard.Verdict.NOT_JUDGED;
+            kind = ScenarioBoard.Kind.AUTOMATION_FAILURE;
+            reason = "The test could not carry this scenario out (an automation failure, not an application defect): " + PlainText.oneLine(PlainText.assertion(String.valueOf(error.getMessage())), 300);
+        } else if (found > 0) {
+            v = ScenarioBoard.Verdict.FAIL;
+            kind = ScenarioBoard.Kind.APPLICATION_DEFECT;
+            refs = refsFor(tc, id);
+            reason = found + (found == 1 ? " problem" : " problems") + " found in the application (see the steps below).";
+        } else if (notJudged) {
+            v = ScenarioBoard.Verdict.NOT_JUDGED;
+            reason = "The application stopped at an earlier problem of every row, so the values of this scenario were not judged.";
+        } else {
+            v = ScenarioBoard.Verdict.PASS;
+            reason = "The expected behaviour was observed.";
+        }
+        r.impact(impactCreated == 0 && impactUpdated == 0 ? "No " + impactWhat + " were created or updated by this scenario." : impactWhat.substring(0, 1).toUpperCase() + impactWhat.substring(1)
+                + " created: " + impactCreated + ", updated: " + impactUpdated + " (as answered by the application)" + (impactCreated > 0 && impactWhat.equals("employees") ? "; edge employees now registered: " + budget : "") + ".");
+        r.finishScenario(v, kind, refs, reason, error != null ? error : skip);
+        scenarioFinished(label, v == ScenarioBoard.Verdict.PASS ? "p" : v == ScenarioBoard.Verdict.FAIL ? "f" : "s");
+        return v == ScenarioBoard.Verdict.PASS;
+    }
+
+    /** A test case: its summary entry (created first so that it stands before its scenarios), its scenarios, and the check that no scenario found a defect. */
+    private void runCase(String id, String title, Runnable prepare, Runnable define) {
+        tc = id;
+        tcSelected = isSelected(id);
+        blockReason = null;
+        tcSummary = ExtentManager.get().createTest("SUMMARY | " + id + " | " + title).assignCategory(ExecutionInfo.module(), id, "Summary");
+        if (tcSelected) {
+            prepare.run();
+        }
+        define.run();
+        List<ScenarioBoard.Outcome> mine = ScenarioBoard.outcomes(id);
+        boolean red = mine.stream().anyMatch(o -> o.verdict == ScenarioBoard.Verdict.FAIL);
+        tcSummary.log(red ? com.aventstack.extentreports.Status.FAIL : com.aventstack.extentreports.Status.PASS, ScenarioBoard.summaryHtml(id, id + " - " + title));
+        Log.info("AOR edge cases " + id + ": " + budget + ", payroll sessions " + sessions + " of " + sessionLimit + ", scenarios run " + ran);
+        long failed = mine.stream().filter(o -> o.verdict == ScenarioBoard.Verdict.FAIL).count();
+        org.testng.Assert.assertEquals(failed, 0L, failed + " scenario(s) of " + id + " found problems in the application (see the scenario entries of the report)");
+    }
+
+    @Override
+    protected List<String> plannedScenarios() {
+        registerDefects();
+        planning = true;
+        plannedLabels.clear();
+        try {
+            tc = "TC-AOR-EDGE-01";
+            defineEdge01();
+            tc = "TC-AOR-EDGE-02";
+            defineEdge02();
+            return new ArrayList<>(plannedLabels);
+        } catch (RuntimeException e) {
+            Log.warn("The scenarios could not be listed in advance (the progress box counts test cases instead): " + e);
+            return null;
+        } finally {
+            planning = false;
+            tc = "";
+        }
+    }
+
+    // ------------------------------------------------------------------ tags and defect links of the AOR edge scenarios
+
+    private static List<String> tagsFor(String tc, String id) {
+        if (tc.endsWith("01")) {
+            switch (id) {
+                case "S00": case "B00": return List.of("Set-up");
+                case "W01": case "W02": case "W03": case "W04": case "W05": return List.of("Unusable Files");
+                case "X00": return List.of("Diagnostics");
+                case "U1": case "G6": return List.of("Required Values");
+                case "G1": case "G2": case "G3": case "G4": case "G5": case "G7": case "G8": case "S11": return List.of("Wrong Formats");
+                case "I00": return List.of("Data Integrity");
+                case "I01": return List.of("Existing Employee Update", "Data Integrity");
+                case "S01": case "S02": case "S03": case "S04": case "S05": case "S06": return List.of("Date Validation", "Business Rules");
+                case "S07": case "S08": case "S09": case "S10": return List.of("Business Rules");
+                case "S12": case "S13": case "S14": case "S15": return List.of("Duplicates");
+                case "M01": return List.of("Multiple Rows");
+                case "M02": case "U6": return List.of("Multiple Rows", "Duplicates");
+                case "K01": case "K02": case "K03": return List.of("Column Validation");
+                case "V01": case "V02": return List.of("Valid Edge Values");
+                case "R00": return List.of("Retention");
+                default: return List.of("Other");
+            }
+        }
+        switch (id) {
+            case "S00": case "B01": return List.of("Set-up");
+            case "P01": case "P02": case "P03": case "P04": case "P05": return List.of("Payee Sheet Window Checks");
+            case "W01": case "W02": case "W03": return List.of("Unusable Files");
+            case "Q00": return List.of("Valid Baseline");
+            case "R00": return List.of("Retention");
+            default: return List.of("Payee Sheet Row Checks");
+        }
+    }
+
+    /** The known application defects (one reference each); scenarios that show the same defect link to the same reference and are counted once as a unique defect. */
+    private static void registerDefects() {
+        ScenarioBoard.defect("AOR-D01", "High", "An existing employee is overwritten by a row that repeats its company employee id",
+                "The upload answers \"0 created, 1 updated\" and the list entry of the existing employee (name, delivery partner id, state) is replaced.");
+        ScenarioBoard.defect("AOR-D02", "High", "A second employee is created with an already used e-mail, contact number or bank account (Aadhaar and PAN also, seen earlier)", "Only a repeated delivery partner id is refused.");
+        ScenarioBoard.defect("AOR-D03", "High", "The Payee Sheet accepts rows whose state, Wm name or hub is empty or wrong", "Only the FHRID is checked against the employee; payroll entries are created.");
+        ScenarioBoard.defect("AOR-D04", "Medium", "Business rules are not enforced", "Under 18, joining / onboarding date in the future, hub name rule, state against hub, country other than India, unknown delivery status are accepted.");
+        ScenarioBoard.defect("AOR-D05", "Medium", "Field formats are not validated", "Contact number, company employee id, FHRID format, names and free text, IFSC and account number; PAN and Aadhaar only partly.");
+        ScenarioBoard.defect("AOR-D06", "Medium", "Required columns are not enforced", "Most columns may be empty, only spaces, or the word null (to be confirmed with the product owner).");
+        ScenarioBoard.defect("AOR-D07", "Medium", "The Payee Sheet accepts a pay period in the future", "");
+        ScenarioBoard.defect("AOR-D08", "Medium", "The Payee Sheet accepts a decimal payout (1234.567)", "");
+        ScenarioBoard.defect("AOR-D09", "Low", "Messages show developer text instead of plain words", "For example \"Input should be a valid string\" and the PAN / Aadhaar verification error with an internal class name.");
+        ScenarioBoard.defect("AOR-D10", "Low", "A missing or renamed column is reported as an empty value", "\"Name: Input should be a valid string\" instead of saying that the column is missing.");
+    }
+
+    private static List<String> refsFor(String tc, String id) {
+        switch (id) {
+            case "U1": return List.of("AOR-D06", "AOR-D09");
+            case "G1": case "G2": case "G4": case "G5": case "G7": case "G8": case "S11": return List.of("AOR-D05");
+            case "G3": return List.of("AOR-D05", "AOR-D09");
+            case "G6": return List.of("AOR-D06");
+            case "I01": return List.of("AOR-D01");
+            case "S02": case "S03": case "S04": case "S05": case "S07": case "S08": case "S09": case "S10": return List.of("AOR-D04");
+            case "S12": case "S13": case "S14": return List.of("AOR-D02");
+            case "K01": case "K02": return List.of("AOR-D10", "AOR-D09");
+            case "P05": return List.of("AOR-D07");
+            case "Q11": return List.of("AOR-D08");
+            case "Q03": case "Q04": case "Q05": case "Q06": case "Q13": case "Q14": return List.of("AOR-D03");
+            default: return List.of();
+        }
     }
 
     private String signIn() {
@@ -1285,6 +1424,8 @@ public class AorEdgeCases extends BaseTest {
             rep.note("What the application answered: " + a.describe());
             Map<Integer, List<String>> issues = parseIssues(all);
             int created = Math.max(0, AorDialog.numberBefore(all, "created", "added", "inserted", "onboarded"));
+            int judged = 0;
+            int notReached = 0;
             for (int i = 0; i < specs.size(); i++) {
                 int row = i + 2;
                 List<String> rowIssues = issues.get(row);
@@ -1312,23 +1453,31 @@ public class AorEdgeCases extends BaseTest {
                     boolean ok;
                     String shown;
                     if (named) {
+                        judged++;
                         ok = true;
                         shown = "reported: \"" + shorten(issueOf(rowIssues, key)) + "\"";
                     } else if (optional) {
+                        judged++;
                         ok = true;
                         shown = "accepted (this column is optional)";
                     } else if (empty) {
+                        judged++;
                         ok = true;
                         shown = "accepted empty - is this column optional? (to be confirmed with the product owner)";
                     } else if (checked) {
+                        judged++;
                         ok = false;
                         shown = "NOT reported: the application checked the other values of this row and accepted this one";
                     } else {
+                        notReached++;
                         ok = true;
                         shown = "not judged: the application stopped at another problem of this row before it checked this value";
                     }
                     c.check(where, labelOf(key) + " " + value, ok, "the application names \"" + labelOf(key) + "\" and refuses the row", shown);
                 }
+            }
+            if (judged == 0 && notReached > 0) {
+                notJudged = true; // the application stopped at an earlier problem of every row: nothing was judged
             }
         });
     }
@@ -1368,7 +1517,9 @@ public class AorEdgeCases extends BaseTest {
         agents.openBulkUpload();
         agents.attach(file);
         rep.evidence("bulk_" + (++shots) + "_chosen", "The upload window with the file \"" + file.getFileName() + "\"");
+        rep.addFile("Uploaded workbook", "uploads/" + file.getFileName());
         AorDialog.Answer a = agents.clickUploadAndWait(300);
+        countImpact(a);
         rep.evidence("bulk_" + shots + "_answer", "What the application answered");
         agents.dialog().dismiss();
         return a;
@@ -1480,6 +1631,9 @@ public class AorEdgeCases extends BaseTest {
             d.attach(file);
         }
         rep.evidence("pay_" + (++shots) + "_filled", "The Upload Pay Sheet window" + (file == null ? " without a file" : " with the file \"" + file.getFileName() + "\""));
+        if (file != null) {
+            rep.addFile("Uploaded workbook", "uploads/" + file.getFileName());
+        }
         AorDialog.Answer a;
         try {
             a = d.clickAndWait("Upload", file == null || client == null || project == null ? 25 : 300); // an incomplete window is answered at once
@@ -1487,6 +1641,7 @@ public class AorEdgeCases extends BaseTest {
             a = new AorDialog.Answer();
             a.windowText = "The Upload button cannot be clicked with these choices (the application refuses it by keeping the button off).";
         }
+        countImpact(a);
         rep.evidence("pay_" + shots + "_answer", "What the application answered");
         d.dismiss();
         return a;

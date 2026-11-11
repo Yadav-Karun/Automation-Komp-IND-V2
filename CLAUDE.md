@@ -651,3 +651,17 @@ mvn clean test -Dsuite=testng-aor-onboarding-finance.xml -Dcases=TC-AOR-02 -Daor
   (the old rebuild applied the "changes" of a duplicate-id scenario and put another employee's delivery partner id into a saved row). (3) The progress box must be REGISTERED for new pages before it is drawn: the first update runs on `chrome://new-tab-page`, which refuses scripts,
   and the exception skipped the registration, so the box was missing for the whole first case; `RunBanner.ensure()` also redraws it before every step. (4) Dates of rows beyond the template's prefilled rows get a date format (else they read back as serial numbers).
 - **Findings so far:** (1) CONFIRMED 2026-11-11 (user: keep it failing): the Bank Sheet of ONE payroll session also lists the payees of OTHER sessions of the same date (10 rows instead of 5, in TC-AOR-02 step 6 and again with two sessions of the run on the same date); the sheet amounts are the final payout less 1% (to be confirmed with the client); (2) after a Payee Sheet upload the next windows do not offer the new session until the page is reloaded.
+
+## 12. REPORTING STANDARD (user, 2026-11-11: applies to every module and every future suite)
+
+- **One scenario = one report entry** in the left panel (`TestReporter.startScenario` + `finishScenario` / `finishAuto`), named `<parent TC> | <scenario id> | <title>`, in execution order, with its own steps, expected / actual, test data,
+  screenshots, application messages, impact line, tags and defect references. Reference implementations: `AorEdgeCases` (71 scenarios) and `ProjectCreationEdgeCases` (`entry(...)`, every `scenario(...)` is an entry).
+- **Verdicts** (`reporting/ScenarioBoard`): PASS (green) / FAIL (red = confirmed application defect) / NOT RUN (grey) / BLOCKED (orange, prerequisite or network missing) / NOT JUDGED (grey, the application did not reach the checked
+  stage or the test itself could not carry it out = AUTOMATION FAILURE, never counted as an application defect). A skipped case is never PASS.
+- **Summaries:** every report starts with the entry "SUMMARY | All test cases of this run" (`BaseTest` creates and fills it; counts, unique defects with their scenarios, per-test-case table, non-passing list); a class with scenario entries
+  also gets one summary entry per parent TC. Unique defects: the same defect reference on several scenarios counts once as a defect and every scenario as failed. Known defects get a reference with `ScenarioBoard.defect(...)`;
+  without one the same problem sentence gets the same `AUTO-nnn` reference (`ScenarioBoard.autoRef`).
+- **Classes that still use `TestReporter.start(...)` cases** (client onboarding, happy flows, journeys) get the standard automatically in `TestReporter.finish`: verdict, kind tag, defect reference, summary rows and the full API record. A new suite must use scenario
+  entries from the start. A journey / happy flow stays ONE case with its phases (its phases depend on each other); an independent check must be its own scenario entry.
+- **API calls** of every entry are recorded in full (`-Dcapture.api.full=false` switches it off): endpoint, method, URL, headers, payload, status, response body, timestamps, duration -> folded node "API calls observed (n)" + `api-evidence/`.
+  Per the user's decision nothing is masked in these records (passwords, tokens, Aadhaar, PAN, bank accounts) except with `-Dmask.secrets=true`; a production run always masks.

@@ -30,6 +30,8 @@ import pages.AdminHomePage;
 import pages.LoginPage;
 import pages.ProjectsPage;
 import reporting.ExecutionInfo;
+import reporting.ScenarioBoard;
+import reporting.ExtentManager;
 import reporting.TestReporter;
 import utils.ConfigManager;
 import utils.FormFeedback.Outcome;
@@ -154,6 +156,8 @@ public class ProjectCreationEdgeCases extends BaseTest {
         final long seed = ConfigManager.get("project.seed") != null ? Long.parseLong(ConfigManager.get("project.seed")) : System.nanoTime() & 0xFFFFFFFFL;
 
         TestReporter rep;
+        ClientData holder;
+        com.aventstack.extentreports.ExtentTest tcSummary;
         final List<String> failures = new ArrayList<>();
         final List<Created> created = new ArrayList<>();
         final List<Object[]> rejected = new ArrayList<>();
@@ -177,19 +181,11 @@ public class ProjectCreationEdgeCases extends BaseTest {
         // ------------------------------------------------------------------------------------------------------------------------------ the case
 
         void execute() {
-            ClientData holder = new ClientData(); // the report's case header needs a client record; the real header line is headline()
+            holder = new ClientData(); // the report's entry header needs a client record; the real header line is headline()
             holder.legalName = "(chosen in S00)";
             holder.clientType = type;
             holder.email = ConfigManager.eorEmail();
-            rep = TestReporter.start(tc, "Project edge cases " + type, type + " project creation: every negative, boundary and behaviour scenario of the "
-                    + "Add Project form and of the " + type + " listing (at most " + budget.limit() + " projects)",
-                    "Edge cases of the Project module for " + type + " with at most " + budget.limit() + " new projects: mandatory fields, lengths, special "
-                            + "characters, duplicates, dates, locations, Cancel / double click / refresh / Back, what the listing really holds, search, filters, "
-                            + "tabs, page size, sort, access without being signed in",
-                    "Valid baseline data with ONE thing changed per refused scenario; the accepted variants combined in 5 planned projects (P01 - P05)",
-                    "Invalid input is refused with a clear message and creates no project; valid edge input is accepted and listed exactly as entered; "
-                            + "no HTTP 5xx, no raw database text, no script runs",
-                    driver, holder, this::headline);
+            tcSummary = ExtentManager.get().createTest("SUMMARY | " + tc + " | " + type + " project edge cases").assignCategory(ExecutionInfo.module(), tc, "Summary");
             try {
                 setup();
                 refusals();
@@ -203,7 +199,6 @@ public class ProjectCreationEdgeCases extends BaseTest {
             } finally {
                 String summary = "Scenarios run: " + ran + " | " + budget + " (limit " + budget.limit() + ") | refused attempts: " + rejected.size()
                         + " | projects accepted although they should have been refused: " + (leftovers.isEmpty() ? "none" : leftovers);
-                rep.note(summary);
                 Log.info(summary);
                 try {
                     List<String> lines = new ArrayList<>();
@@ -228,53 +223,65 @@ public class ProjectCreationEdgeCases extends BaseTest {
 
         // ------------------------------------------------------------------------------------------------------------------------------ scenario plumbing
 
-        /** One scenario = one report step. Returns true when it ended without a defect. A failing scenario is recorded and the next one goes on. */
+        /** One scenario = one report entry (the reporting standard). Returns true when it ended without a defect. A failing scenario is recorded and the next one goes on. */
         boolean scenario(String sid, String title, String expected, TestReporter.PhaseAction body) {
-            String id = type + "-" + sid;
-            if (!wanted(id)) {
-                return true;
-            }
-            ran++;
-            int before = rep.defects().size();
-            try {
-                rep.phase(slug(tc) + "_" + slug(id), id + " | " + title, expected, () -> {
-                    heal();
-                    return body.run();
-                });
-            } catch (SkipException e) {
-                if (String.valueOf(e.getMessage()).contains("network connection")) {
-                    throw e; // a lost network is not a scenario result: the case is reported as skipped
-                }
-                return false; // the scenario skipped itself (recorded as SKIP in the report)
-            } catch (Throwable t) {
-                failures.add(id + ": " + String.valueOf(t.getMessage()).split("\\R")[0]);
-                return false;
-            }
-            return rep.defects().size() == before;
+            return entry(sid, title, expected, r -> r.phase(slug(tc) + "_" + slug(type + "-" + sid), type + "-" + sid + " | " + title, expected, () -> {
+                heal();
+                return body.run();
+            }));
         }
 
         boolean scenarioChecks(String sid, String title, String expected, TestReporter.CheckAction body) {
+            return entry(sid, title, expected, r -> r.phaseChecks(slug(tc) + "_" + slug(type + "-" + sid), type + "-" + sid + " | " + title, expected, c -> {
+                heal();
+                body.run(c);
+            }));
+        }
+
+        private boolean entry(String sid, String title, String expected, java.util.function.Consumer<TestReporter> action) {
             String id = type + "-" + sid;
             if (!wanted(id)) {
                 return true;
             }
             ran++;
-            int before = rep.defects().size();
+            TestReporter r = TestReporter.startScenario(tc, id, List.of(groupOf(sid)), title, "What is checked: " + title,
+                    "Valid baseline data with ONE thing changed (see the steps of this entry)", expected, driver, holder, this::headline);
+            r.captureFullApi();
+            rep = r;
+            Throwable error = null;
+            SkipException skip = null;
             try {
-                rep.phaseChecks(slug(tc) + "_" + slug(id), id + " | " + title, expected, c -> {
-                    heal();
-                    body.run(c);
-                });
+                action.accept(r);
             } catch (SkipException e) {
                 if (String.valueOf(e.getMessage()).contains("network connection")) {
-                    throw e;
+                    r.finishAuto(null, e);
+                    throw e; // a lost network is not a scenario result: the case is reported as skipped
                 }
-                return false;
+                skip = e;
             } catch (Throwable t) {
+                error = t;
                 failures.add(id + ": " + String.valueOf(t.getMessage()).split("\\R")[0]);
-                return false;
             }
-            return rep.defects().size() == before;
+            return r.finishAuto(error, skip) == ScenarioBoard.Verdict.PASS;
+        }
+
+        /** The tag (group) of a scenario, from its letter: the same groups as the sections of the class comment. */
+        String groupOf(String sid) {
+            switch (sid.substring(0, 1)) {
+                case "S": return "Set-up";
+                case "V": return "Required-values";
+                case "F": return "Length-limits";
+                case "T": return "Date-rules";
+                case "D": return "Duplicates";
+                case "P": return "Accepted-variants";
+                case "L": case "B": return "Form-behaviour";
+                case "Z": return "Listing-contents";
+                case "Q": return "Search";
+                case "K": return "Tabs-and-filters";
+                case "G": return "Table-and-paging";
+                case "U": return "Access-without-sign-in";
+                default: return "Other";
+            }
         }
 
         /** -Dcases lists the case (everything runs) or this scenario. The set-up S00 and the baseline P01 always run (P01 creates nothing in re-check mode). */

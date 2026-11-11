@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,20 @@ public final class TestReporter {
     private TestReporter previous;
     private boolean finished;
 
+    // ---- scenario reporting: every scenario of a class is ONE report entry (see ScenarioBoard)
+    private String scenarioId;
+    private String parentTc;
+    private String scenarioTestData = "";
+    private String scenarioExpected = "";
+    private final Map<String, String> scenarioFiles = new LinkedHashMap<>();
+    private String scenarioImpact = "";
+    private boolean fullApi;
+    private final List<ApiCall> allCalls = new ArrayList<>();
+    private Status statusOverride;
+    private String resultLabel;
+    private String skipWord;
+    private boolean classified;
+
     /** "ID - title" of this case (for the list in the progress bar). */
     public String name() {
         return testName;
@@ -108,6 +123,7 @@ public final class TestReporter {
         r.headerLine = headerLine;
         r.testName = testName;
         r.description = plain(description);
+        r.fullApi = ConfigManager.getBool("capture.api.full", true);
         r.record.id = id;
         r.record.group = group;
         r.record.title = title;
@@ -244,7 +260,12 @@ public final class TestReporter {
     private List<ApiCall> collectCalls() {
         List<ApiCall> all = new ArrayList<>(carried);
         carried.clear();
-        all.addAll(NetworkCapture.drain(driver));
+        List<ApiCall> fresh = fullApi ? NetworkCapture.drainFull(driver) : NetworkCapture.drain(driver);
+        if (fullApi) {
+            fresh.forEach(c -> c.phase = seq);
+            allCalls.addAll(fresh);
+        }
+        all.addAll(fresh);
         return all;
     }
 
@@ -319,9 +340,12 @@ public final class TestReporter {
         if ("PASS".equals(overall) && !defects.isEmpty()) {
             overall = "FAIL"; // a case that found a defect is never reported as passed
         }
+        if (!classified && scenarioId == null) {
+            overall = classifyLegacy(overall, failure);
+        }
         LocalDateTime ended = LocalDateTime.now();
         StringBuilder sb = new StringBuilder();
-        sb.append("<b>Result of this test: ").append(resultWord(overall)).append("</b><br>")
+        sb.append("<b>Result of this test: ").append(resultLabel != null ? resultLabel : resultWord(overall)).append("</b><br>")
                 .append("Started: ").append(TS.format(started)).append(" | Ended: ").append(TS.format(ended))
                 .append(" | Duration: ").append(duration(Duration.between(started, ended))).append("<br>")
                 .append(esc(header())).append("<br>")
@@ -344,7 +368,7 @@ public final class TestReporter {
             tech.append("</ul>");
         }
         sb.append(technical(tech.toString()));
-        Status s = "PASS".equals(overall) ? Status.PASS : "SKIP".equals(overall) ? Status.SKIP : Status.FAIL;
+        Status s = statusOverride != null ? statusOverride : "PASS".equals(overall) ? Status.PASS : "SKIP".equals(overall) ? Status.SKIP : Status.FAIL;
         ExtentTest summary = test.createNode("Summary of this test");
         summary.log(s, sb.toString());
         if (failure != null && !"PASS".equals(overall) && (defects.isEmpty() || "SKIP".equals(overall))) {
@@ -441,7 +465,7 @@ public final class TestReporter {
         try {
             String why = skip == null || skip.getMessage() == null ? "see the summary below" : PlainText.assertion(SecretMasker.mask(skip.getMessage()));
             why = PlainText.oneLine(PlainText.simplify(why), 480);
-            test.getModel().setDescription(plain("NOT RUN because: " + why + "  |  What was checked: " + description));
+            test.getModel().setDescription(plain((skipWord == null ? "NOT RUN" : skipWord) + " because: " + why + "  |  What was checked: " + description));
         } catch (RuntimeException e) {
             Log.warn("Skipped case not renamed in the report: " + e.getClass().getSimpleName());
         }
@@ -482,7 +506,7 @@ public final class TestReporter {
             om.writeValue(Files.newOutputStream(ExecutionInfo.apiEvidence().resolve("network-summary.json")), doc);
             // one file per test case, so every bug keeps its own API evidence (network-summary.json only holds the last test)
             doc.put("testCase", record.id);
-            om.writeValue(Files.newOutputStream(ExecutionInfo.apiEvidence().resolve("network-" + record.id + ".json")), doc);
+            om.writeValue(Files.newOutputStream(ExecutionInfo.apiEvidence().resolve("network-" + String.valueOf(record.id).replaceAll("[^A-Za-z0-9._-]+", "_") + ".json")), doc);
         } catch (IOException e) {
             Log.warn("network-summary.json not written: " + e.getMessage());
         }
@@ -531,6 +555,300 @@ public final class TestReporter {
             sb.append("... and ").append(lines.size() - 15).append(" more (see api-evidence/network-summary.json)");
         }
         return sb.append("</small>").toString();
+    }
+
+
+    // ================================================================== scenario entries (the reporting standard of 2026-11-11)
+
+    /**
+     * Starts ONE scenario as its own entry of the report (left panel): the name is "<test case> | <scenario id> | <title>", the tags are the module, the parent test case and the
+     * given reusable tags. The entry keeps its own steps, screenshots, files, API calls and verdict; {@link #finishScenario} closes it.
+     */
+    public static TestReporter startScenario(String parentTc, String id, List<String> tags, String title, String description, String testData, String expected,
+            WebDriver driver, ClientData data, java.util.function.Supplier<String> headerLine) {
+        title = PlainText.simplify(title);
+        description = cleanDescription(PlainText.simplify(description));
+        String testName = plain(parentTc + " | " + id + " | " + title);
+        ExtentTest t = ExtentManager.get().createTest(testName, plain(description));
+        List<String> cats = new ArrayList<>();
+        cats.add(ExecutionInfo.module());
+        cats.add(parentTc);
+        for (String g : tags) {
+            cats.add(g.trim().replaceAll("\\s+", "-"));
+        }
+        t.assignCategory(cats.toArray(new String[0]));
+        TestReporter r = new TestReporter(driver, t, data);
+        r.headerLine = headerLine;
+        r.testName = testName;
+        r.description = plain(description);
+        r.scenarioId = id;
+        r.parentTc = parentTc;
+        r.scenarioTestData = testData == null ? "" : testData;
+        r.scenarioExpected = expected == null ? "" : expected;
+        r.record.id = parentTc + " | " + id;
+        r.record.group = String.join(", ", tags);
+        r.record.title = title;
+        r.record.input = testData;
+        r.record.expected = expected;
+        r.record.started = r.started;
+        r.record.run = ExecutionInfo.id();
+        t.info("<b>Scenario:</b> " + esc(id) + "<br><b>Parent test case:</b> " + esc(parentTc) + "<br><b>Tags:</b> " + esc(String.join(", ", tags)) + "<br><b>Test data:</b> "
+                + esc(r.scenarioTestData) + "<br><b>Expected result:</b> " + esc(r.scenarioExpected) + "<br>Started: " + TS.format(r.started) + " | " + esc(r.header()));
+        r.previous = CURRENT.get();
+        CURRENT.set(r);
+        Log.info("Scenario started: " + testName);
+        return r;
+    }
+
+    /** From now on the full record of every call the page sends (URL, headers, bodies, times) is kept for this scenario. */
+    public TestReporter captureFullApi() {
+        this.fullApi = true;
+        return this;
+    }
+
+    /** A file that belongs to this scenario (for example the uploaded workbook): shown as a link in the scenario's evidence. {@code relativePath} is relative to the run folder. */
+    public void addFile(String label, String relativePath) {
+        scenarioFiles.put(label, relativePath);
+    }
+
+    /** What the scenario did to the records of the application (employees created or updated ...). */
+    public void impact(String text) {
+        this.scenarioImpact = text == null ? "" : text;
+    }
+
+    /**
+     * Closes a scenario with its verdict. {@code kind}: an application defect (verdict FAIL) or an automation failure (the test could not carry the scenario out: NOT JUDGED) are
+     * never the same thing. {@code defectRefs} link the scenario to the known defects (the same defect can be shown by many scenarios). The entry gets the colour of the verdict, a
+     * tag for the verdict, one for the kind and one per defect reference, and - for NOT RUN / BLOCKED / NOT JUDGED - the verdict in its name.
+     */
+    public void finishScenario(ScenarioBoard.Verdict v, ScenarioBoard.Kind kind, List<String> defectRefs, String reason, Throwable failure) {
+        if (finished) {
+            return;
+        }
+        this.statusOverride = v.extent;
+        this.resultLabel = v.label + (kind == ScenarioBoard.Kind.NONE ? "" : " - " + kind.label);
+        this.skipWord = v.label;
+        String actual = record.phases.isEmpty() ? "" : String.valueOf(record.phases.get(record.phases.size() - 1).actual);
+        StringBuilder ev = new StringBuilder("<table border='1' cellpadding='5' style='border-collapse:collapse'>");
+        ev.append(evRow("Scenario", scenarioId)).append(evRow("Parent test case", parentTc)).append("<tr><td><b>Status</b></td><td>").append(v.badge()).append("</td></tr>")
+                .append(evRow("Kind", kind.label)).append(evRow("Why it has this status", reason == null || reason.isBlank() ? "-" : reason));
+        if (!defectRefs.isEmpty()) {
+            StringBuilder refs = new StringBuilder();
+            defectRefs.forEach(r -> refs.append(ScenarioBoard.describeDefect(r)).append("; "));
+            ev.append(evRow("Defect reference", refs.toString()));
+        }
+        ev.append(evRow("Test data used", scenarioTestData)).append(evRow("Expected result", scenarioExpected)).append(evRow("Actual result", actual.isBlank() ? (reason == null ? "-" : reason) : actual));
+        if (!scenarioFiles.isEmpty()) {
+            ev.append("<tr><td><b>Files</b></td><td>");
+            scenarioFiles.forEach((label, path) -> ev.append(esc(label)).append(": <a href='").append(esc(path)).append("'>").append(esc(path)).append("</a><br>"));
+            ev.append("</td></tr>");
+        }
+        ev.append(evRow("Record impact", scenarioImpact.isBlank() ? "none recorded" : scenarioImpact)).append("</table>");
+        test.createNode("Scenario result and evidence").info(ev.toString());
+        attachApiEvidence();
+        classified = true;
+        test.assignCategory("Status-" + v.label.replace(' ', '-'));
+        if (kind != ScenarioBoard.Kind.NONE) {
+            test.assignCategory(kind == ScenarioBoard.Kind.APPLICATION_DEFECT ? "Application-Defect" : "Automation-Failure");
+        }
+        for (String ref : defectRefs) {
+            test.assignCategory(ref);
+        }
+        Throwable cause = failure != null ? failure : v == ScenarioBoard.Verdict.PASS ? null : new org.testng.SkipException(reason == null ? v.label : reason);
+        finish(v == ScenarioBoard.Verdict.PASS ? "PASS" : v == ScenarioBoard.Verdict.FAIL ? "FAIL" : "SKIP", cause);
+        if (v != ScenarioBoard.Verdict.PASS && v != ScenarioBoard.Verdict.FAIL) {
+            try {
+                test.getModel().setName(plain(testName + " [" + v.label + "]"));
+            } catch (RuntimeException ignored) {
+                // the name stays as it was
+            }
+        }
+        ScenarioBoard.Outcome o = new ScenarioBoard.Outcome();
+        o.tc = parentTc;
+        o.id = scenarioId;
+        o.title = record.title;
+        o.verdict = v;
+        o.kind = kind;
+        o.defectRefs = new ArrayList<>(defectRefs);
+        o.tags = new ArrayList<>(Arrays.asList(String.valueOf(record.group).split(", ")));
+        o.reason = reason == null ? "" : reason;
+        ScenarioBoard.register(o);
+    }
+
+
+    /**
+     * Closes a scenario entry the standard way for suites that keep no defect list: a skip = NOT RUN (BLOCKED when a prerequisite or the network is missing), an exception of the
+     * test itself = NOT JUDGED + automation failure, a recorded problem = FAIL + application defect (the same problem text always gets the same AUTO reference), else PASS.
+     */
+    public ScenarioBoard.Verdict finishAuto(Throwable error, org.testng.SkipException skip) {
+        ScenarioBoard.Verdict v;
+        ScenarioBoard.Kind kind = ScenarioBoard.Kind.NONE;
+        List<String> refs = new ArrayList<>();
+        String reason;
+        int found = defects.size();
+        if (skip != null) {
+            String msg = String.valueOf(skip.getMessage());
+            v = msg.contains("network connection") || msg.contains("limit") || msg.contains("prerequisite") || msg.startsWith("Blocked: ") ? ScenarioBoard.Verdict.BLOCKED : ScenarioBoard.Verdict.NOT_RUN;
+            reason = msg;
+        } else if (found > 0) {
+            v = ScenarioBoard.Verdict.FAIL;
+            kind = ScenarioBoard.Kind.APPLICATION_DEFECT;
+            for (String h : defectHeadlines) {
+                String ref = ScenarioBoard.autoRef(h);
+                if (!refs.contains(ref)) {
+                    refs.add(ref);
+                }
+            }
+            if (refs.isEmpty()) {
+                refs.add(ScenarioBoard.autoRef(defects.get(0)));
+            }
+            reason = found + (found == 1 ? " problem" : " problems") + " found in the application (see the steps below).";
+        } else if (error != null) {
+            v = ScenarioBoard.Verdict.NOT_JUDGED;
+            kind = ScenarioBoard.Kind.AUTOMATION_FAILURE;
+            reason = "The test could not carry this scenario out (an automation failure, not an application defect): " + PlainText.oneLine(PlainText.assertion(String.valueOf(error.getMessage())), 300);
+        } else {
+            v = ScenarioBoard.Verdict.PASS;
+            reason = "The expected behaviour was observed.";
+        }
+        finishScenario(v, kind, refs, reason, error != null ? error : skip);
+        return v;
+    }
+
+    private void attachApiEvidence() {
+        if (!allCalls.isEmpty()) {
+            test.createNode("API calls observed (" + allCalls.size() + ")").info(apiDetailsHtml());
+            writeApiEvidenceFile();
+        }
+    }
+
+    /**
+     * Every case that is closed through {@link #finish} (all test classes of the project) gets the reporting standard automatically: one of the five verdicts, the kind (an assertion
+     * that the application broke a rule is an APPLICATION DEFECT; an exception of the test itself - a click that is not possible, a wait that timed out - is an AUTOMATION FAILURE and the
+     * case is NOT JUDGED), status / kind / defect tags, a defect reference (the same problem text = the same reference), and the full API record of the case.
+     */
+    private String classifyLegacy(String overall, Throwable failure) {
+        classified = true;
+        ScenarioBoard.Verdict v;
+        ScenarioBoard.Kind kind = ScenarioBoard.Kind.NONE;
+        List<String> refs = new ArrayList<>();
+        String msg = failure == null || failure.getMessage() == null ? "" : failure.getMessage();
+        if ("PASS".equals(overall)) {
+            v = ScenarioBoard.Verdict.PASS;
+        } else if ("SKIP".equals(overall)) {
+            v = msg.contains("network connection") || msg.contains("limit") || msg.contains("prerequisite") || msg.startsWith("Not run: ") ? ScenarioBoard.Verdict.BLOCKED : ScenarioBoard.Verdict.NOT_RUN;
+        } else {
+            boolean automation = defects.isEmpty() && failure != null && (!(failure instanceof AssertionError) || msg.startsWith("Could not") || msg.startsWith("Expected condition")
+                    || msg.contains("did not appear within"));
+            if (automation) {
+                v = ScenarioBoard.Verdict.NOT_JUDGED;
+                kind = ScenarioBoard.Kind.AUTOMATION_FAILURE;
+            } else {
+                v = ScenarioBoard.Verdict.FAIL;
+                kind = ScenarioBoard.Kind.APPLICATION_DEFECT;
+                String headline = !defectHeadlines.isEmpty() ? defectHeadlines.get(0) : PlainText.firstSentences(PlainText.assertion(SecretMasker.mask(msg)), 1);
+                refs.add(ScenarioBoard.autoRef(headline));
+            }
+        }
+        this.statusOverride = v.extent;
+        this.resultLabel = v.label + (kind == ScenarioBoard.Kind.NONE ? "" : " - " + kind.label);
+        this.skipWord = v.label;
+        attachApiEvidence();
+        test.assignCategory("Status-" + v.label.replace(' ', '-'));
+        if (kind != ScenarioBoard.Kind.NONE) {
+            test.assignCategory(kind == ScenarioBoard.Kind.APPLICATION_DEFECT ? "Application-Defect" : "Automation-Failure");
+        }
+        refs.forEach(test::assignCategory);
+        if (v != ScenarioBoard.Verdict.PASS && v != ScenarioBoard.Verdict.FAIL) {
+            try {
+                test.getModel().setName(plain(testName + " [" + v.label + "]"));
+            } catch (RuntimeException ignored) {
+                // the name stays as it was
+            }
+        }
+        ScenarioBoard.Outcome o = new ScenarioBoard.Outcome();
+        o.tc = record.group == null || record.group.isBlank() ? "General" : record.group;
+        o.id = record.id;
+        o.title = record.title;
+        o.verdict = v;
+        o.kind = kind;
+        o.defectRefs = refs;
+        o.tags = new ArrayList<>(List.of(o.tc));
+        o.reason = msg;
+        ScenarioBoard.register(o);
+        return v == ScenarioBoard.Verdict.PASS ? "PASS" : v == ScenarioBoard.Verdict.FAIL ? "FAIL" : "SKIP";
+    }
+
+    private static String evRow(String k, String v) {
+        return "<tr><td><b>" + esc(k) + "</b></td><td>" + esc(v) + "</td></tr>";
+    }
+
+    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+
+    /** Every call of the scenario in the order it was seen; nothing is masked (user's decision): URL, headers, body, status, response, times. */
+    private String apiDetailsHtml() {
+        StringBuilder sb = new StringBuilder("<p>Calls the page itself sent to the server while this scenario ran (observed in the browser; the test sent none of them). "
+                + "Associated: " + esc(parentTc) + " / " + esc(scenarioId) + ".</p>");
+        sb.append("<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>#</th><th>Step</th><th>Request time</th><th>Method</th><th>URL</th><th>Status</th><th>Response time</th><th>Duration</th></tr>");
+        int n = 0;
+        for (ApiCall c : allCalls) {
+            n++;
+            sb.append("<tr><td>").append(n).append("</td><td>").append(c.phase).append("</td><td>").append(clock(c.startMs)).append("</td><td>").append(esc(c.method)).append("</td><td>")
+                    .append(esc(c.fullUrl == null ? c.url : c.fullUrl)).append("</td><td>").append(c.error != null ? "FAILED (" + esc(c.error) + ")" : String.valueOf(c.status)).append("</td><td>")
+                    .append(clock(c.endMs)).append("</td><td>").append(c.durationMs < 0 ? "-" : c.durationMs + " ms").append("</td></tr>");
+        }
+        sb.append("</table>");
+        n = 0;
+        for (ApiCall c : allCalls) {
+            n++;
+            sb.append("<details style='margin-top:6px'><summary><b>#").append(n).append("</b> ").append(esc(c.method)).append(" ").append(esc(c.url)).append(" -> ")
+                    .append(c.error != null ? "FAILED" : String.valueOf(c.status)).append("</summary>")
+                    .append("<b>Request headers</b><pre>").append(esc(headers(c.requestHeaders))).append("</pre>")
+                    .append("<b>Request body</b><pre>").append(esc(c.requestBody == null ? "(none)" : c.requestBody)).append("</pre>")
+                    .append("<b>Response headers</b><pre>").append(esc(headers(c.responseHeaders))).append("</pre>")
+                    .append("<b>Response body</b><pre>").append(esc(c.responseBody == null ? "(not available)" : c.responseBody)).append("</pre></details>");
+        }
+        return sb.toString();
+    }
+
+    private static String clock(long ms) {
+        return ms <= 0 ? "-" : CLOCK.format(java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), java.time.ZoneId.systemDefault()));
+    }
+
+    private static String headers(Map<String, String> h) {
+        StringBuilder sb = new StringBuilder();
+        h.forEach((k, v) -> sb.append(k).append(": ").append(v).append("\n"));
+        return sb.length() == 0 ? "(none recorded)" : sb.toString();
+    }
+
+    private void writeApiEvidenceFile() {
+        try {
+            java.nio.file.Path dir = ExecutionInfo.root().resolve("api-evidence");
+            java.nio.file.Files.createDirectories(dir);
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (ApiCall c : allCalls) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("testCase", parentTc);
+                m.put("scenario", scenarioId);
+                m.put("step", c.phase);
+                m.put("method", c.method);
+                m.put("url", c.fullUrl == null ? c.url : c.fullUrl);
+                m.put("requestHeaders", c.requestHeaders);
+                m.put("requestBody", c.requestBody);
+                m.put("status", c.status);
+                m.put("error", c.error);
+                m.put("responseHeaders", c.responseHeaders);
+                m.put("responseBody", c.responseBody);
+                m.put("requestTime", clock(c.startMs));
+                m.put("responseTime", clock(c.endMs));
+                m.put("durationMs", c.durationMs);
+                out.add(m);
+            }
+            new com.fasterxml.jackson.databind.ObjectMapper().enable(com.fasterxml.jackson.databind.SerializationFeature.INDENT_OUTPUT)
+                    .writeValue(dir.resolve("scenario_" + (scenarioId == null ? String.valueOf(record.id) : parentTc + "_" + scenarioId).replaceAll("[^A-Za-z0-9]+", "_") + ".json").toFile(), out);
+        } catch (java.io.IOException | RuntimeException e) {
+            Log.warn("The API record of the scenario could not be written: " + e.getMessage());
+        }
     }
 
     private static String stack(Throwable t) {

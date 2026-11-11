@@ -21,7 +21,23 @@ public final class ExtentManager {
             ".detail-head .info, .detail-head .info > * { height: auto !important; min-height: 0 !important; }"
                     + ".detail-head .info h5.test-status { margin-bottom: 8px; line-height: 1.35; }"
                     + ".detail-head .info .badge { margin-top: 2px; margin-bottom: 2px; }"
-                    + ".node-attr { display: none !important; }";
+                    + ".node-attr { display: none !important; }"
+                    // verdict colours of the scenario reports: NOT RUN / NOT JUDGED grey, BLOCKED orange
+                    + ".skip-bg, .badge.skip, .status.skip, .test-status.skip { background-color: #9e9e9e !important; color: #fff !important; }"
+                    + ".text-skip { color: #757575 !important; }"
+                    + ".warning-bg, .badge.warning, .status.warning, .test-status.warning { background-color: #ef6c00 !important; color: #fff !important; }"
+                    + ".text-warning { color: #ef6c00 !important; }"
+                    // summary entries: the Status and Timestamp columns of the log table are hidden, the summary uses the whole width (its own time stands at its top right)
+                    + "table:has(.komp-summary) > thead > tr > :nth-child(-n+2), table:has(.komp-summary) > tbody > tr > :nth-child(-n+2), table:has(.komp-summary) > tr > :nth-child(-n+2) { display: none !important; }"
+                    + "table:has(.komp-summary) > thead > tr > :nth-child(3), table:has(.komp-summary) > tbody > tr > :nth-child(3), table:has(.komp-summary) > tr > :nth-child(3) { width: 100% !important; }"
+                    // font 2 points smaller everywhere (zoom 0.875 = 14px -> 12px) and words are never broken in the middle (wrapping only at spaces)
+                    + ".test-content > *, .test-list > * { zoom: 0.875; }"
+                    + "body, td, th, p, span, h1, h2, h3, h4, h5, h6, div { word-break: normal !important; overflow-wrap: normal !important; hyphens: none !important; }"
+                    // the table of scenarios that did not pass: every column but the title stays on ONE line, the title takes the rest of the width and wraps at spaces
+                    + ".komp-scroll { overflow-x: auto; max-width: 100%; }"
+                    + "table.komp-np { border-collapse: collapse; width: 100%; }"
+                    + "table.komp-np th, table.komp-np td { white-space: nowrap; vertical-align: top; }"
+                    + "table.komp-np th:nth-child(5), table.komp-np td:nth-child(5) { white-space: normal; min-width: 22em; width: 100%; }";
 
     private ExtentManager() {
     }
