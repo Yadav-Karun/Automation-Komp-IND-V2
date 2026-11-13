@@ -4,7 +4,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -29,7 +28,6 @@ import reporting.ScenarioBoard;
 import reporting.TestReporter;
 import reporting.ValueChecks;
 import utils.ConfigManager;
-import utils.Log;
 
 /**
  * AOR LIST SCREENS - negative and edge cases (user, 2026-11-13): the three lists of the AOR user - AOR Agents, AOR Payroll and AOR Invoices - are checked the way the Clients list and
@@ -38,7 +36,7 @@ import utils.Log;
  * (Payroll, Invoices). Everything is READ-ONLY: nothing is created or changed. The expected results are computed from the whole list, which is read once (all pages, 50 per page).
  * One scenario = one report entry (the reporting standard); TC-AOR-LIST-01 = Agents, -02 = Payroll, -03 = Invoices.
  */
-public class AorListEdgeCases extends BaseTest {
+public class AorListScreensEdgeCases extends BaseTest {
 
     private static final DateTimeFormatter[] DATE_FORMATS = {DateTimeFormatter.ofPattern("dd-MM-yyyy"), DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH),
             DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ENGLISH), DateTimeFormatter.ofPattern("dd/MM/yyyy"), DateTimeFormatter.ofPattern("yyyy-MM-dd"), DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.ENGLISH)};
@@ -116,6 +114,8 @@ public class AorListEdgeCases extends BaseTest {
         ran++;
         TestReporter r = TestReporter.startScenario(tc, sid, List.of(tag), title, "What is checked: " + title, "The list \"" + spec.name + "\" as it is shown", expected, driver, holder, this::headline);
         r.captureFullApi();
+        r.steps("S00".equals(sid) ? List.of("Open the login page of the application", "Sign in as the AOR user and open the list \"" + spec.name + "\"")
+                : List.of("Sign in as the AOR user and open the list \"" + spec.name + "\"", "On the list: " + title, "Compare what the list shows with what the whole list holds (every page read once)"));
         rep = r;
         Throwable error = null;
         SkipException skip = null;
@@ -449,7 +449,7 @@ public class AorListEdgeCases extends BaseTest {
     private void safeCase(String sid, String term) {
         s(sid, "Search", "Search text " + (term.length() > 20 ? term.substring(0, 12) + "... (" + term.length() + " characters)" : "\"" + term + "\"") + " is handled safely", "Plain text: nothing runs, no server error, only matching rows or none; the page keeps working", c -> {
             list.open();
-            int calls = rep.observeApi().size();
+            rep.observeApi();
             List<Map<String, String>> rows;
             try {
                 rows = list.search(term);

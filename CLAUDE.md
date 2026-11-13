@@ -645,7 +645,7 @@ mvn clean test -Dsuite=testng-aor-onboarding-finance.xml -Dcases=TC-AOR-02 -Daor
   pairs no employee used yet come first (`AorDataGenerator.pickPairs`, booked as kind AADHAAR in `testdata/aor-used-ids.txt`). (3) LIMITS: happy flow 5 employees per run; edge cases NO LIMIT (user, 2026-11-11: the Aadhaar / PAN pairs supplied are the only supply, unused pairs first, then the list is used again;
   `testdata/aor-edge-employees.txt` only counts; `-Daor.edge.employees.max` can set one); a failed / refused upload creates nobody anyway. REPORTS: a class report lists EVERY scenario and case of the class - one that is not run (filter, missing base) is a SKIP row with the reason. (4) Four files in `C:\Testing\KOMP IND - Automation File\Bulk Upload\AOR` hold the data of the latest run until the next run replaces it:
   `AOR - Bulk Upload.xlsx` + `AOR Payroll - Calculation.xlsx` (happy flow) and the two `...EdgeCases.xlsx` (edge cases). The PRISTINE templates are the copies in `testdata/aor-templates/` (`aorBulkUploadTemplatePath`, `aorPayeeSheetTemplatePath`): only read.
-  (5) Edge class `AorEdgeCases` (suite `testng-aor-edge-cases.xml`, TC-AOR-EDGE-01 bulk upload, TC-AOR-EDGE-02 Payee Sheet): see its Javadoc; scenario workbooks are kept in the run folder `uploads/`.
+  (5) Edge class `AorBulkUploadAndPayeeSheetEdgeCases` (suite `testng-aor-edge-cases.xml`, TC-AOR-EDGE-01 bulk upload, TC-AOR-EDGE-02 Payee Sheet): see its Javadoc; scenario workbooks are kept in the run folder `uploads/`.
 - **Lessons 2026-11-11 (edge workbooks / progress box):** (1) a workbook is written to a `.part` file and only a FINISHED one replaces the target (`AorWorkbooks.writeEmployeeWorkbook/writePayeeWorkbook`): the old R00 copied the template over the retained
   edge workbook first and then failed on an accepted date written as text ("11-Nov-2031"), which left the file empty. (2) The edge workbook keeps rows exactly as they were uploaded (`writeRawRows`, rows of the file + this run's `uploads/`), never rebuilt from objects
   (the old rebuild applied the "changes" of a duplicate-id scenario and put another employee's delivery partner id into a saved row). (3) The progress box must be REGISTERED for new pages before it is drawn: the first update runs on `chrome://new-tab-page`, which refuses scripts,
@@ -655,7 +655,7 @@ mvn clean test -Dsuite=testng-aor-onboarding-finance.xml -Dcases=TC-AOR-02 -Daor
 ## 12. REPORTING STANDARD (user, 2026-11-11: applies to every module and every future suite)
 
 - **One scenario = one report entry** in the left panel (`TestReporter.startScenario` + `finishScenario` / `finishAuto`), named `<parent TC> | <scenario id> | <title>`, in execution order, with its own steps, expected / actual, test data,
-  screenshots, application messages, impact line, tags and defect references. Reference implementations: `AorEdgeCases` (71 scenarios) and `ProjectCreationEdgeCases` (`entry(...)`, every `scenario(...)` is an entry).
+  screenshots, application messages, impact line, tags and defect references. Reference implementations: `AorBulkUploadAndPayeeSheetEdgeCases` (71 scenarios) and `ProjectCreationEdgeCases` (`entry(...)`, every `scenario(...)` is an entry).
 - **Verdicts** (`reporting/ScenarioBoard`): PASS (green) / FAIL (red = confirmed application defect) / NOT RUN (grey) / BLOCKED (orange, prerequisite or network missing) / NOT JUDGED (grey, the application did not reach the checked
   stage or the test itself could not carry it out = AUTOMATION FAILURE, never counted as an application defect). A skipped case is never PASS.
 - **Summaries:** every report starts with the entry "SUMMARY | All test cases of this run" (`BaseTest` creates and fills it; counts, unique defects with their scenarios, per-test-case table, non-passing list); a class with scenario entries
@@ -665,6 +665,12 @@ mvn clean test -Dsuite=testng-aor-onboarding-finance.xml -Dcases=TC-AOR-02 -Daor
   entries from the start. A journey / happy flow stays ONE case with its phases (its phases depend on each other); an independent check must be its own scenario entry.
 - **API calls** of every entry are recorded in full (`-Dcapture.api.full=false` switches it off): endpoint, method, URL, headers, payload, status, response body, timestamps, duration -> folded node "API calls observed (n)" + `api-evidence/`.
   Per the user's decision nothing is masked in these records (passwords, tokens, Aadhaar, PAN, bank accounts) except with `-Dmask.secrets=true`; a production run always masks.
+- **Entry layout (user, 2026-11-13, after the reference report `AOR_Test_Report (2).html`):** (1) scenarios are NUMBERED in execution order per test case: `TC-AOR-EDGE-01 | 7 | <title>` (`ScenarioBoard.nextNumber`; the internal id such as `G1`
+  stays in the entry head as "id G1" for `-Dcases` / `-Daor.edge.only`, and the summaries show "7 (G1)"). (2) The top of every scenario entry (`TestReporter.caseHead`, written when the scenario ends) reads like a bug report: a headline (for a failed
+  scenario the plain title of its known defect), "Severity - Priority - Area" (High = P2, Medium = P3, Low = P4; "not rated" for AUTO references), Steps to reproduce (`TestReporter.steps(...)`, set by the test class), Test data, Expected, Actual, Artifacts (pictures,
+  uploaded workbooks, number of server calls). The old "Scenario result and evidence" node is gone. Headings must be short and plain: a batch of values keeps its title short ("Contact number: wrong values are refused", `headingOf`) and lists the values under
+  Test data. (3) The Status and Timestamp columns of every log table and the duration chip of every step are hidden by CSS (`ExtentManager.CSS`): Details uses the whole width. (4) "API calls observed (n)" is one table in the order the calls happened
+  (#, step, method, endpoint, status, time); a click on a call opens two options, **Payload** and **Response**, each with its headers folded below (JSON laid out, long texts cut at 30,000 characters: the whole text stays in `api-evidence/`).
 
 ## 13. Employee - EOR onboarding (`tests.employee.eor`) - happy flow only
 

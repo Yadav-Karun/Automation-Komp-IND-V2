@@ -15,7 +15,6 @@ import model.ProjectData;
 import pages.AddProjectPage;
 import pages.LoginPage;
 import pages.ProjectsPage;
-import reporting.TestReporter;
 import reporting.ValueChecks;
 import utils.ConfigManager;
 import utils.FormFeedback;

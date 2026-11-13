@@ -249,6 +249,13 @@ public final class AorDataGenerator {
                 return name;
             }
         }
+        // all 1,600 two-part names are used (first x last): a middle name gives 64,000 more (first middle last), so a run never stops for lack of names
+        for (int i = 0; i < 5000; i++) {
+            String name = FIRST[rnd.nextInt(FIRST.length)] + " " + FIRST[rnd.nextInt(FIRST.length)] + " " + LAST[rnd.nextInt(LAST.length)];
+            if (used.add(name.toLowerCase())) {
+                return name;
+            }
+        }
         throw new IllegalStateException("No unused employee name is left.");
     }
 

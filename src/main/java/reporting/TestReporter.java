@@ -77,7 +77,12 @@ public final class TestReporter {
 
     // ---- scenario reporting: every scenario of a class is ONE report entry (see ScenarioBoard)
     private String scenarioId;
+    private int scenarioNo;
     private String parentTc;
+    /** The steps to reproduce, in plain words (set by the test class; without them the titles of the steps are used). */
+    private List<String> scenarioSteps;
+    /** Pictures of this scenario in the order they were taken (shown again under "Artifacts" at the top of the entry). */
+    private final List<String> shots = new ArrayList<>();
     private String scenarioTestData = "";
     private String scenarioExpected = "";
     private final Map<String, String> scenarioFiles = new LinkedHashMap<>();
@@ -172,6 +177,7 @@ public final class TestReporter {
             if (defects.size() > defectsBefore) {
                 // the phase ran to the end but found a product defect (soft check): the phase result is FAIL, never PASS
                 String shot = phaseDefectShot != null ? phaseDefectShot : ScreenshotManager.capture(driver, fileName(idx, "FAIL"), true);
+                shots.add(shot);
                 node.fail(detail(expected, "PROBLEM FOUND - " + actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
                 results.add(new String[] { String.valueOf(idx), title, "FAIL", shot });
                 recordPhase(idx, title, expected, "PROBLEM FOUND - " + SecretMasker.mask(actual), "FAIL", shot);
@@ -179,6 +185,7 @@ public final class TestReporter {
                 return;
             }
             String shot = ScreenshotManager.capture(driver, fileName(idx, "PASS"), false);
+            shots.add(shot);
             node.pass(detail(expected, actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
             results.add(new String[] { String.valueOf(idx), title, "PASS", shot });
             recordPhase(idx, title, expected, SecretMasker.mask(actual), "PASS", shot);
@@ -194,6 +201,7 @@ public final class TestReporter {
                 List<ApiCall> skipCalls = collectCalls();
                 String skipReason = SecretMasker.mask(t.getMessage() == null ? "skipped" : t.getMessage());
                 String skipShot = ScreenshotManager.capture(driver, fileName(idx, "SKIP"), false);
+                shots.add(skipShot);
                 node.skip(detail(expected, "NOT RUN - " + skipReason) + phaseHtml + technical(apiHtml(idx, title, skipCalls)), media(skipShot));
                 results.add(new String[] { String.valueOf(idx), title, "SKIP", skipShot });
                 recordPhase(idx, title, expected, "NOT RUN - " + skipReason, "SKIP", skipShot);
@@ -208,6 +216,7 @@ public final class TestReporter {
             String reason = t instanceof AssertionError ? PlainText.assertion(technicalText) : STEP_NOT_COMPLETED;
             String console = String.join("<br>", NetworkCapture.severeConsole(driver).stream().map(TestReporter::esc).toList());
             String label = t instanceof AssertionError ? "PROBLEM FOUND - " : "THE TEST COULD NOT COMPLETE THIS STEP - ";
+            shots.add(shot);
             node.fail(detail(expected, label + reason) + phaseHtml
                     + technical("<b>Technical message:</b> " + esc(PlainText.oneLine(technicalText, 700))
                             + "<br><b>Error trace:</b><pre>" + esc(SecretMasker.mask(stack(t))) + "</pre>"
@@ -283,6 +292,7 @@ public final class TestReporter {
     public void evidence(String label, String caption) {
         String shot = ScreenshotManager.capture(driver,
                 fileName(seq, "PASS") .replace("_PASS.png", "_" + (++evidenceCount) + "_" + label + "_PASS.png"), false);
+        shots.add(shot);
         node.info("Extra screenshot: " + esc(PlainText.simplify(caption)), media(shot));
     }
 
@@ -573,7 +583,8 @@ public final class TestReporter {
             WebDriver driver, ClientData data, java.util.function.Supplier<String> headerLine) {
         title = PlainText.simplify(title);
         description = cleanDescription(PlainText.simplify(description));
-        String testName = plain(parentTc + " | " + id + " | " + title);
+        int no = ScenarioBoard.nextNumber(parentTc);
+        String testName = plain(parentTc + " | " + no + " | " + title);
         ExtentTest t = ExtentManager.get().createTest(testName, plain(description));
         List<String> cats = new ArrayList<>();
         cats.add(ExecutionInfo.module());
@@ -587,22 +598,34 @@ public final class TestReporter {
         r.testName = testName;
         r.description = plain(description);
         r.scenarioId = id;
+        r.scenarioNo = no;
         r.parentTc = parentTc;
         r.scenarioTestData = testData == null ? "" : testData;
         r.scenarioExpected = expected == null ? "" : expected;
-        r.record.id = parentTc + " | " + id;
+        r.record.id = parentTc + " | " + no + " (" + id + ")";
         r.record.group = String.join(", ", tags);
         r.record.title = title;
         r.record.input = testData;
         r.record.expected = expected;
         r.record.started = r.started;
         r.record.run = ExecutionInfo.id();
-        t.info("<b>Scenario:</b> " + esc(id) + "<br><b>Parent test case:</b> " + esc(parentTc) + "<br><b>Tags:</b> " + esc(String.join(", ", tags)) + "<br><b>Test data:</b> "
-                + esc(r.scenarioTestData) + "<br><b>Expected result:</b> " + esc(r.scenarioExpected) + "<br>Started: " + TS.format(r.started) + " | " + esc(r.header()));
+        // the readable head of the entry (title, severity, steps, expected, actual, artifacts) is written when the scenario ends: it is only then that the result is known
         r.previous = CURRENT.get();
         CURRENT.set(r);
         Log.info("Scenario started: " + testName);
         return r;
+    }
+
+    /** The steps to reproduce the scenario in plain words ("Sign in as the AOR user", "Open Employees > AOR ..."). */
+    public TestReporter steps(List<String> steps) {
+        this.scenarioSteps = steps;
+        return this;
+    }
+
+    /** Replaces the "test data" line of the entry (for example the list of values a batch of rows tries). */
+    public TestReporter testData(String text) {
+        this.scenarioTestData = text == null ? "" : text;
+        return this;
     }
 
     /** From now on the full record of every call the page sends (URL, headers, bodies, times) is kept for this scenario. */
@@ -634,22 +657,7 @@ public final class TestReporter {
         this.resultLabel = v.label + (kind == ScenarioBoard.Kind.NONE ? "" : " - " + kind.label);
         this.skipWord = v.label;
         String actual = record.phases.isEmpty() ? "" : String.valueOf(record.phases.get(record.phases.size() - 1).actual);
-        StringBuilder ev = new StringBuilder("<table border='1' cellpadding='5' style='border-collapse:collapse'>");
-        ev.append(evRow("Scenario", scenarioId)).append(evRow("Parent test case", parentTc)).append("<tr><td><b>Status</b></td><td>").append(v.badge()).append("</td></tr>")
-                .append(evRow("Kind", kind.label)).append(evRow("Why it has this status", reason == null || reason.isBlank() ? "-" : reason));
-        if (!defectRefs.isEmpty()) {
-            StringBuilder refs = new StringBuilder();
-            defectRefs.forEach(r -> refs.append(ScenarioBoard.describeDefect(r)).append("; "));
-            ev.append(evRow("Defect reference", refs.toString()));
-        }
-        ev.append(evRow("Test data used", scenarioTestData)).append(evRow("Expected result", scenarioExpected)).append(evRow("Actual result", actual.isBlank() ? (reason == null ? "-" : reason) : actual));
-        if (!scenarioFiles.isEmpty()) {
-            ev.append("<tr><td><b>Files</b></td><td>");
-            scenarioFiles.forEach((label, path) -> ev.append(esc(label)).append(": <a href='").append(esc(path)).append("'>").append(esc(path)).append("</a><br>"));
-            ev.append("</td></tr>");
-        }
-        ev.append(evRow("Record impact", scenarioImpact.isBlank() ? "none recorded" : scenarioImpact)).append("</table>");
-        test.createNode("Scenario result and evidence").info(ev.toString());
+        test.info(caseHead(v, defectRefs, reason, actual));
         attachApiEvidence();
         classified = true;
         test.assignCategory("Status-" + v.label.replace(' ', '-'));
@@ -670,6 +678,7 @@ public final class TestReporter {
         }
         ScenarioBoard.Outcome o = new ScenarioBoard.Outcome();
         o.tc = parentTc;
+        o.no = scenarioNo;
         o.id = scenarioId;
         o.title = record.title;
         o.verdict = v;
@@ -744,7 +753,7 @@ public final class TestReporter {
             v = msg.contains("network connection") || msg.contains("limit") || msg.contains("prerequisite") || msg.startsWith("Not run: ") ? ScenarioBoard.Verdict.BLOCKED : ScenarioBoard.Verdict.NOT_RUN;
         } else {
             boolean automation = defects.isEmpty() && failure != null && (!(failure instanceof AssertionError) || msg.startsWith("Could not") || msg.startsWith("Expected condition")
-                    || msg.contains("did not appear within"));
+                    || msg.contains("did not appear within") || msg.startsWith("The page did not show what the test needed"));
             if (automation) {
                 v = ScenarioBoard.Verdict.NOT_JUDGED;
                 kind = ScenarioBoard.Kind.AUTOMATION_FAILURE;
@@ -790,29 +799,157 @@ public final class TestReporter {
 
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
-    /** Every call of the scenario in the order it was seen; nothing is masked (user's decision): URL, headers, body, status, response, times. */
+    private static final ObjectMapper PRETTY = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+    private static final int BODY_LIMIT = 30000;
+
+    /** Plain words for the verdict of an entry. */
+    private static String verdictWords(ScenarioBoard.Verdict v) {
+        return switch (v) {
+            case PASS -> "Passed";
+            case FAIL -> "Failed";
+            case NOT_RUN -> "Not run";
+            case BLOCKED -> "Blocked (something this scenario needs was missing)";
+            case NOT_JUDGED -> "Could not be judged";
+        };
+    }
+
+    /** The priority that goes with a severity (the reference report uses the same pairing: High = P2, Medium = P3, Low = P4). */
+    private static String priorityOf(String severity) {
+        return switch (severity) {
+            case "High" -> "P2";
+            case "Medium" -> "P3";
+            case "Low" -> "P4";
+            default -> "not set";
+        };
+    }
+
+    /**
+     * The head of a scenario entry, written the way a bug report reads: a headline, "Severity - Priority - Area", the steps to reproduce, what was expected, what the application
+     * did, and the artifacts (pictures, files, the number of server calls). Everything a manager needs stands here; the steps below it hold the details.
+     */
+    private String caseHead(ScenarioBoard.Verdict v, List<String> defectRefs, String reason, String actual) {
+        StringBuilder sb = new StringBuilder("<div class='komp-case'>");
+        String severity = "";
+        for (String ref : defectRefs) {
+            String s = ScenarioBoard.defectSeverity(ref);
+            if ("High".equals(s) || ("Medium".equals(s) && !"High".equals(severity)) || ("Low".equals(s) && severity.isEmpty())) {
+                severity = s;
+            }
+        }
+        String headline = record.title;
+        if (v == ScenarioBoard.Verdict.FAIL && !defectRefs.isEmpty()) {
+            headline = ScenarioBoard.defectTitle(defectRefs.get(0));
+        }
+        String area = String.valueOf(record.group).replace(", ", " / ");
+        sb.append("<div class='kc-title'>").append(esc(PlainText.simplify(headline))).append("</div><div class='kc-meta'>");
+        if (v == ScenarioBoard.Verdict.FAIL) {
+            sb.append("Severity: ").append(severity.isEmpty() ? "not rated" : esc(severity)).append(" &middot; Priority: ").append(priorityOf(severity)).append(" &middot; Area: ").append(esc(area));
+        } else {
+            sb.append("Result: ").append(esc(verdictWords(v))).append(" &middot; Area: ").append(esc(area));
+        }
+        sb.append(" &middot; Scenario ").append(scenarioNo).append(" of ").append(esc(parentTc)).append(" (id ").append(esc(scenarioId)).append(")</div>");
+
+        List<String> steps = new ArrayList<>();
+        if (scenarioSteps != null) {
+            steps.addAll(scenarioSteps);
+        } else {
+            for (String[] r : results) {
+                steps.add(r[1].replaceFirst("^[A-Za-z0-9-]+ \\| ", ""));
+            }
+        }
+        if (!steps.isEmpty()) {
+            sb.append("<h6>Steps to reproduce</h6><ol>");
+            steps.forEach(s -> sb.append("<li>").append(esc(PlainText.simplify(s))).append("</li>"));
+            sb.append("</ol>");
+        }
+        if (!scenarioTestData.isBlank()) {
+            sb.append("<h6>Test data</h6><p>").append(esc(PlainText.simplify(scenarioTestData))).append("</p>");
+        }
+        sb.append("<h6>Expected</h6><p>").append(esc(PlainText.simplify(scenarioExpected))).append("</p>");
+        String said = actual == null || actual.isBlank() ? (reason == null ? "-" : reason) : actual;
+        sb.append("<h6>Actual</h6><p>").append(esc(PlainText.oneLine(PlainText.simplify(SecretMasker.mask(said)), 900))).append("</p>");
+        if (!defectRefs.isEmpty()) {
+            StringBuilder refs = new StringBuilder();
+            defectRefs.forEach(r -> refs.append(ScenarioBoard.describeDefect(r)).append("; "));
+            sb.append("<p><b>Known problem:</b> ").append(esc(refs.toString())).append("</p>");
+        }
+        if (v != ScenarioBoard.Verdict.PASS && v != ScenarioBoard.Verdict.FAIL && reason != null && !reason.isBlank()) {
+            sb.append("<p><b>Why:</b> ").append(esc(PlainText.oneLine(PlainText.simplify(reason), 600))).append("</p>");
+        }
+        boolean any = !shots.isEmpty() || !scenarioFiles.isEmpty() || !allCalls.isEmpty();
+        if (any) {
+            sb.append("<h6>Artifacts</h6><div class='kc-art'>");
+            int shown = 0;
+            for (String s : new java.util.LinkedHashSet<>(shots)) {
+                if (s != null && shown++ < 6) {
+                    sb.append("<a href='").append(esc(s)).append("' target='_blank'><img src='").append(esc(s)).append("' alt='screenshot'></a>");
+                }
+            }
+            scenarioFiles.forEach((label, path) -> sb.append("<div>").append(esc(label)).append(": <a href='").append(esc(path)).append("'>").append(esc(path)).append("</a></div>"));
+            if (!allCalls.isEmpty()) {
+                sb.append("<div>Calls the page sent to the server: ").append(allCalls.size()).append(" (listed in order at the bottom of this entry, with payload and response)</div>");
+            }
+            sb.append("</div>");
+        }
+        sb.append("<div class='kc-small'>").append(esc(scenarioImpact.isBlank() ? "" : scenarioImpact)).append(scenarioImpact.isBlank() ? "" : "<br>")
+                .append("Started: ").append(TS.format(started)).append(" &middot; ").append(esc(header())).append("</div></div>");
+        return sb.toString();
+    }
+
+    /** The path (and query) of an address, the part a reader recognises. */
+    private static String endpointOf(ApiCall c) {
+        String u = c.fullUrl == null ? c.url : c.fullUrl;
+        try {
+            java.net.URI uri = java.net.URI.create(u);
+            String p = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+            return uri.getRawQuery() == null ? p : p + "?" + uri.getRawQuery();
+        } catch (RuntimeException e) {
+            return u == null ? "" : u;
+        }
+    }
+
+    /** A body as readable text: JSON is laid out, a very long text is cut (the whole text is in the api-evidence file). */
+    private static String bodyText(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        String t = body.trim();
+        if (t.startsWith("{") || t.startsWith("[")) {
+            try {
+                t = PRETTY.writeValueAsString(PRETTY.readTree(t));
+            } catch (IOException | RuntimeException ignored) {
+                // not JSON after all: shown as it is
+            }
+        }
+        return t.length() > BODY_LIMIT ? t.substring(0, BODY_LIMIT) + "\n... (shortened: the whole text is in the file of this scenario in the folder api-evidence)" : t;
+    }
+
+    /**
+     * Every call of the scenario in the order it happened, as one table (number, step, method, endpoint, status, time). A click on a call opens two options:
+     * Payload (what the page sent) and Response (what the server answered), each with its headers folded below. Nothing is masked (user's decision).
+     */
     private String apiDetailsHtml() {
-        StringBuilder sb = new StringBuilder("<p>Calls the page itself sent to the server while this scenario ran (observed in the browser; the test sent none of them). "
-                + "Associated: " + esc(parentTc) + " / " + esc(scenarioId) + ".</p>");
-        sb.append("<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>#</th><th>Step</th><th>Request time</th><th>Method</th><th>URL</th><th>Status</th><th>Response time</th><th>Duration</th></tr>");
+        StringBuilder sb = new StringBuilder("<p>The calls the page sent to the server while this scenario ran, in the order they happened. Click a call to open its <b>Payload</b> and its <b>Response</b>.</p>");
+        sb.append("<div class='kapi'><div class='kapi-row kapi-head'><span>#</span><span>Step</span><span>Method</span><span>Endpoint</span><span>Status</span><span>Time</span></div>");
         int n = 0;
         for (ApiCall c : allCalls) {
             n++;
-            sb.append("<tr><td>").append(n).append("</td><td>").append(c.phase).append("</td><td>").append(clock(c.startMs)).append("</td><td>").append(esc(c.method)).append("</td><td>")
-                    .append(esc(c.fullUrl == null ? c.url : c.fullUrl)).append("</td><td>").append(c.error != null ? "FAILED (" + esc(c.error) + ")" : String.valueOf(c.status)).append("</td><td>")
-                    .append(clock(c.endMs)).append("</td><td>").append(c.durationMs < 0 ? "-" : c.durationMs + " ms").append("</td></tr>");
+            String status = c.error != null ? "FAILED" : c.status < 0 ? "no answer" : String.valueOf(c.status);
+            String cls = c.error != null || c.status >= 500 ? "bad" : c.status >= 400 || c.status < 0 ? "warn" : "ok";
+            String full = c.fullUrl == null ? c.url : c.fullUrl;
+            sb.append("<details class='kapi-call'><summary class='kapi-row' title='").append(esc(full)).append("'><span>").append(n).append("</span><span>").append(c.phase).append("</span><span><b>")
+                    .append(esc(c.method)).append("</b></span><span class='ep'>").append(esc(endpointOf(c))).append("</span><span class='").append(cls).append("'>").append(esc(status))
+                    .append("</span><span>").append(c.durationMs < 0 ? "-" : c.durationMs + " ms").append("</span></summary><div class='kapi-body'>");
+            String payload = bodyText(c.requestBody);
+            sb.append("<details class='kapi-sub'><summary>Payload</summary><pre>").append(esc(payload == null ? "(no payload: this request sends no body)" : payload)).append("</pre>")
+                    .append("<details><summary>Request headers</summary><pre>").append(esc(headers(c.requestHeaders))).append("</pre></details></details>");
+            String response = bodyText(c.responseBody);
+            sb.append("<details class='kapi-sub'><summary>Response</summary><pre>").append(esc("Status: " + status + (c.error != null ? " (" + c.error + ")" : "") + "\n\n"
+                    + (response == null ? "(no response text available)" : response))).append("</pre>")
+                    .append("<details><summary>Response headers</summary><pre>").append(esc(headers(c.responseHeaders))).append("</pre></details></details>");
+            sb.append("<div class='kc-small'>Sent at ").append(clock(c.startMs)).append(", answered at ").append(clock(c.endMs)).append("<br>").append(esc(full)).append("</div></div></details>");
         }
-        sb.append("</table>");
-        n = 0;
-        for (ApiCall c : allCalls) {
-            n++;
-            sb.append("<details style='margin-top:6px'><summary><b>#").append(n).append("</b> ").append(esc(c.method)).append(" ").append(esc(c.url)).append(" -> ")
-                    .append(c.error != null ? "FAILED" : String.valueOf(c.status)).append("</summary>")
-                    .append("<b>Request headers</b><pre>").append(esc(headers(c.requestHeaders))).append("</pre>")
-                    .append("<b>Request body</b><pre>").append(esc(c.requestBody == null ? "(none)" : c.requestBody)).append("</pre>")
-                    .append("<b>Response headers</b><pre>").append(esc(headers(c.responseHeaders))).append("</pre>")
-                    .append("<b>Response body</b><pre>").append(esc(c.responseBody == null ? "(not available)" : c.responseBody)).append("</pre></details>");
-        }
+        sb.append("</div>");
         return sb.toString();
     }
 

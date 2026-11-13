@@ -63,17 +63,13 @@ import utils.SecretMasker;
  * <p>
  * Run: mvn clean test -Dsuite=testng-aor-edge-cases.xml   (one case: -Dcases=TC-AOR-EDGE-01; some scenarios: -Daor.edge.only=U2,Q05)
  */
-public class AorEdgeCases extends BaseTest {
+public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
 
-    private static final String G_BULK = "AOR bulk upload - edge and negative cases";
-    private static final String G_PAY = "AOR Payee Sheet - edge and negative cases";
     private static final DateTimeFormatter XL = DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.ENGLISH);
     private static final Pattern TECHNICAL = Pattern.compile("(?i)(traceback|exception|sqlstate|constraint|integrityerror|nullpointer|stack trace|syntax error|undefined|violates|pydantic|validation errors? for|type=value_error|input_value|input should be)");
     private static final Pattern ROW = Pattern.compile("Row\\s*-?\\s*(\\d+)\\s*:\\s*");
     /** Columns that the QA owner's data rules leave blank or optional: a value in them that is not reported is not a finding. */
     private static final Set<String> OPTIONAL = Set.of("driving licence number", "vehicle insurance", "letter issue date", "letter issued by", "pan status");
-    private static final String[][] DUPLICATES = { { "delivery partner id", "Delivery partner id" }, { "company employee id", "Company employee id" }, { "aadhar number", "Aadhaar number" },
-            { "pan number", "PAN number" }, { "personal email id", "E-mail" }, { "contact number", "Contact number" }, { "account number", "Bank account number" } };
 
     /** Business-rule scenarios whose outcome is established (accepted, employee created) by the run of 2026-11-11_12.10.32. */
     private static final Set<String> ESTABLISHED = Set.of("S02", "S03", "S04", "S05", "S07", "S08", "S09", "S10", "S11", "S12", "S13", "S14");
@@ -661,7 +657,7 @@ public class AorEdgeCases extends BaseTest {
     private void single(String id, String title, String alias, Function<AorEmployee, Map<String, String>> change, boolean shouldBeAccepted) {
         step(id, title, shouldBeAccepted ? "The application accepts the employee" : "The application refuses the row, creates nobody and names the wrong value", () -> {
             if (ESTABLISHED.contains(id) && "true".equalsIgnoreCase(ConfigManager.get("aor.edge.skip.established"))) {
-                throw new SkipException("Not repeated on request (-Daor.edge.skip.established=true): this scenario was run on 2026-11-11 (report reports/AorEdgeCases/2026-11-11_12.10.32) and the application ACCEPTED the row.");
+                throw new SkipException("Not repeated on request (-Daor.edge.skip.established=true): this scenario was run on 2026-11-11 (report reports/AorBulkUploadAndPayeeSheetEdgeCases/2026-11-11_12.10.32) and the application ACCEPTED the row.");
             }
             needLimit(id, 1);
             AorRun one = AorDataGenerator.newRun(1);
@@ -977,83 +973,6 @@ public class AorEdgeCases extends BaseTest {
         return PlainText.count(intact.size(), "base employee", "base employees") + " used: " + intact.stream().map(e -> e.name).toList();
     }
 
-    // ---- U5: duplicates of an onboarded employee
-
-    private static Map<String, String> duplicateOf(AorEmployee x, AorEmployee b, String col) {
-        Map<String, String> map = new LinkedHashMap<>();
-        switch (col) {
-            case "delivery partner id" -> map.put(col, b.deliveryPartnerId);
-            case "company employee id" -> {
-                map.put(col, b.companyEmployeeId);
-                map.put("hub name", x.hubLocation + "-" + b.companyEmployeeId);
-            }
-            case "aadhar number" -> map.put(col, b.aadhaar);
-            case "pan number" -> map.put(col, b.pan);
-            case "personal email id" -> map.put(col, b.personalEmail);
-            case "contact number" -> map.put(col, b.contactNumber);
-            default -> map.put(col, b.accountNumber);
-        }
-        return map;
-    }
-
-    /** All seven values in one valid row first; what the application did not name is then tried alone, while the limit allows (each could create an employee). */
-    private String duplicates() {
-        if (run == null) {
-            throw new SkipException("Not run: there are no base employees (B00).");
-        }
-        needLimit("U5", 1);
-        AorEmployee base = run.employees.get(0);
-        StringBuilder out = new StringBuilder();
-        AorRun one = AorDataGenerator.newRun(1);
-        AorEmployee e = one.employees.get(0);
-        Map<String, String> all = new LinkedHashMap<>();
-        for (String[] d : DUPLICATES) {
-            all.putAll(duplicateOf(e, base, d[0]));
-        }
-        AorWorkbooks.writeEmployeeWorkbookWith(one, bulkFile(), List.of(all));
-        AorDialog.Answer a = uploadBulk(bulkFile());
-        out.append("All seven values in one row: ").append(a.describe()).append(" ");
-        Map<Integer, List<String>> issues = parseIssues(a.everything());
-        int created = Math.max(0, AorDialog.numberBefore(a.everything(), "created", "added", "inserted", "onboarded"));
-        if (created > 0) {
-            book(e, all);
-            rep.defect("The application accepted an employee that repeats seven values of an onboarded employee", "The row is refused and the repeated values are named", a.describe());
-            return out.toString();
-        }
-        List<String> unnamed = new ArrayList<>();
-        for (String[] d : DUPLICATES) {
-            if (!named(issues.get(2), d[0])) {
-                unnamed.add(d[0]);
-            }
-        }
-        for (String col : unnamed) {
-            if (!budget.reserve(1)) {
-                skippedForLimit.add("U5-" + col);
-                out.append("Not tried alone (limit): ").append(labelOf(col)).append(". ");
-                continue;
-            }
-            AorRun single = AorDataGenerator.newRun(1);
-            AorEmployee s = single.employees.get(0);
-            Map<String, String> ch = duplicateOf(s, base, col);
-            AorWorkbooks.writeEmployeeWorkbookWith(single, bulkFile(), List.of(ch));
-            AorDialog.Answer sa = uploadBulk(bulkFile());
-            int c1 = Math.max(0, AorDialog.numberBefore(sa.everything(), "created", "added", "inserted", "onboarded"));
-            String label = labelOf(col);
-            int upd = Math.max(0, AorDialog.numberBefore(sa.everything(), "updated"));
-            if (c1 > 0) {
-                book(s, ch);
-                rep.defect("The application accepted an employee whose " + label + " is already used by an onboarded employee", label + " is refused as already used", sa.describe());
-            } else if (upd > 0) {
-                rep.defect("The application changed an existing employee instead of refusing a row that repeats the " + label + " of that employee",
-                        "The row is refused; the existing employee stays as it is", sa.describe());
-            } else if (!named(parseIssues(sa.everything()).get(2), col)) {
-                rep.defect("The application refused the row but did not name the repeated " + label, "A message that names " + label, sa.describe());
-            }
-            out.append(label).append(": ").append(sa.describe()).append(" ");
-        }
-        return out.toString();
-    }
-
     private static List<String> concat(List<String> first, List<String> second) {
         List<String> out = new ArrayList<>(first);
         out.addAll(second);
@@ -1297,6 +1216,68 @@ public class AorEdgeCases extends BaseTest {
     }
 
     private boolean tcSelected = true;
+    /** The "test data" of the entry that starts next (a batch lists the values it tries). */
+    private String detailOverride;
+
+    /** The steps to reproduce a scenario, in plain words (shown at the top of its entry). */
+    private List<String> stepsFor(String tcId, String id, String title) {
+        boolean bulk = tcId.endsWith("01");
+        switch (id) {
+            case "S00":
+                return List.of("Open the login page of the application", "Sign in as the AOR user");
+            case "B00":
+                return List.of("Open Employees > AOR and look for the base employees in the list", "If there are too few, upload a valid workbook to create them");
+            case "R00":
+                return List.of("Collect the rows of the employees that are onboarded", "Write them into the edge workbook in the folder of the QA owner");
+            case "I00":
+                return List.of("Sign in as the AOR user", "Open Employees > AOR and search the first base employee", "Open the profile and compare every value with the uploaded workbook");
+            case "I01":
+                return List.of("Open the profile of an existing employee and note every value", "Upload a workbook with a new row that repeats this employee's company employee id",
+                        "Open the profile again and compare it with the notes");
+            default:
+                break;
+        }
+        List<String> out = new ArrayList<>();
+        out.add("Sign in as the AOR user");
+        if (bulk) {
+            out.add("Open Employees > AOR and click \"Bulk Upload\"");
+            if (title.startsWith("Upload clicked")) {
+                out.add("Click \"Upload\" without choosing a file");
+            } else if (detailOverride != null) {
+                out.add("Choose a workbook with one row for each value listed under Test data");
+                out.add("Click \"Upload\" and read the answer of the application");
+            } else {
+                out.add("Choose the workbook made for this scenario: " + title);
+                out.add("Click \"Upload\" and read the answer of the application");
+            }
+        } else {
+            out.add("Open AOR Financials > Payroll and click \"Upload Pay Sheet\"");
+            if (id.equals("P01")) {
+                out.add("Click \"Upload\" without choosing a client, project, period or file");
+            } else if (id.startsWith("P0")) {
+                out.add("Fill in the window as follows: " + title);
+                out.add("Click \"Upload\" and read the answer of the application");
+            } else {
+                out.add("Choose the client \"Bleach\", the project \"The Substitute Shinigami\" and today as the pay period");
+                out.add("Attach the Payee Sheet made for this scenario: " + title);
+                out.add("Click \"Upload\" and read the answer of the application");
+            }
+        }
+        return out;
+    }
+
+    /** "Contact number: letters, mixed, spaces ... (12 rows)" -> "Contact number: wrong values are refused": the values themselves go under "Test data". */
+    private static String headingOf(String title) {
+        java.util.regex.Matcher m = Pattern.compile("^(.*?): .*\\(\\d+ rows?\\)$").matcher(title);
+        if (m.matches()) {
+            return m.group(1) + ": wrong values are refused";
+        }
+        m = Pattern.compile("^(.*) \\(\\d+ rows?\\)$").matcher(title);
+        if (m.matches() && m.group(1).length() > 50) {
+            return m.group(1) + ": wrong values are refused";
+        }
+        return title;
+    }
     private boolean planning;
     private final List<String> plannedLabels = new ArrayList<>();
     private String blockReason;
@@ -1334,6 +1315,7 @@ public class AorEdgeCases extends BaseTest {
     private boolean scenario(String id, String title, String expected, ScenarioRunner runner) {
         if (planning) {
             plannedLabels.add(tc + " | " + id + " | " + title);
+            detailOverride = null;
             return true;
         }
         boolean chosen = selected(id);
@@ -1347,9 +1329,11 @@ public class AorEdgeCases extends BaseTest {
         impactCreated = 0;
         impactUpdated = 0;
         impactWhat = tc.endsWith("02") ? "payroll entries" : "employees";
-        TestReporter r = TestReporter.startScenario(tc, id, tagsFor(tc, id), title, "What is checked: " + title, "Input of this scenario: " + title + ". The uploaded workbook, if the scenario uploads one, is linked in the evidence block at the end of this entry.",
+        TestReporter r = TestReporter.startScenario(tc, id, tagsFor(tc, id), title, "What is checked: " + title, detailOverride == null ? "" : detailOverride,
                 expected, driver, holder(), this::headline);
         r.captureFullApi();
+        r.steps(stepsFor(tc, id, title));
+        detailOverride = null;
         rep = r;
         Throwable error = null;
         SkipException skip = null;
@@ -1582,10 +1566,6 @@ public class AorEdgeCases extends BaseTest {
         return Character.toUpperCase(t.charAt(0)) + t.substring(1);
     }
 
-    private static String norm(String s) {
-        return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-    }
-
     /** The answer of the application as row -> its problems ("Row - 2 : State: Input should be a valid string; Name: ... Row - 3 : ..."; one row can have several, separated by semicolons). */
     private static Map<Integer, List<String>> parseIssues(String text) {
         Map<Integer, List<String>> out = new LinkedHashMap<>();
@@ -1651,7 +1631,8 @@ public class AorEdgeCases extends BaseTest {
     }
 
     private void batch(String id, String title, List<Spec> specs) {
-        stepChecks(id, title, "The application refuses every row, creates nobody, names each wrong column and explains it in plain words", c -> {
+        detailOverride = "Values tried, one row each: " + String.join("; ", specs.stream().map(s -> s.title).toList()) + ".";
+        stepChecks(id, headingOf(title), "The application refuses every row, creates nobody, names each wrong column and explains it in plain words", c -> {
             AorDataGenerator.bookPairs = false; // rows that cannot become employees do not use up Aadhaar / PAN pairs
             AorRun r;
             try {

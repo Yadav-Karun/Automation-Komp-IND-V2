@@ -55,6 +55,8 @@ public final class ScenarioBoard {
 
     public static final class Outcome {
         public String tc;
+        /** The number of the scenario inside its test case (1, 2, 3 ... in execution order): what the report shows. */
+        public int no;
         public String id;
         public String title;
         public Verdict verdict;
@@ -86,12 +88,19 @@ public final class ScenarioBoard {
 
     private static com.aventstack.extentreports.ExtentTest overallEntry;
     private static final Map<String, String> AUTO_REFS = new LinkedHashMap<>();
+    private static final Map<String, Integer> NUMBERS = new LinkedHashMap<>();
+
+    /** The next scenario number of a test case: 1, 2, 3 ... in the order the scenarios start (also the ones that are not run). */
+    public static synchronized int nextNumber(String tc) {
+        return NUMBERS.merge(tc == null ? "" : tc, 1, Integer::sum);
+    }
 
     /** A new class (= a new report) starts. */
     public static synchronized void reset() {
         OUTCOMES.clear();
         CATALOG.clear();
         AUTO_REFS.clear();
+        NUMBERS.clear();
         overallEntry = null;
     }
 
@@ -142,6 +151,18 @@ public final class ScenarioBoard {
         return d == null ? ref : ref + " - " + d.title + " (" + d.severity + ")";
     }
 
+    /** The plain headline of a known defect (the title it was registered with); the reference itself when it is unknown. */
+    public static synchronized String defectTitle(String ref) {
+        Defect d = CATALOG.get(ref);
+        return d == null ? ref : d.title;
+    }
+
+    /** High / Medium / Low as registered; "" when the defect has no rating. */
+    public static synchronized String defectSeverity(String ref) {
+        Defect d = CATALOG.get(ref);
+        return d == null || d.severity == null || d.severity.equals("-") ? "" : d.severity;
+    }
+
     public static synchronized List<Outcome> outcomes(String tc) {
         List<Outcome> out = new ArrayList<>();
         for (Outcome o : OUTCOMES) {
@@ -172,7 +193,7 @@ public final class ScenarioBoard {
                     unreferenced++;
                 }
                 for (String r : o.defectRefs) {
-                    refScenarios.computeIfAbsent(r, k -> new ArrayList<>()).add(o.id);
+                    refScenarios.computeIfAbsent(r, k -> new ArrayList<>()).add(o.no > 0 ? String.valueOf(o.no) : o.id);
                 }
             }
         }
@@ -214,7 +235,7 @@ public final class ScenarioBoard {
         }
         if (!refScenarios.isEmpty()) {
             sb.append("<br><b>Unique application defects and the scenarios that show them</b><table border='1' cellpadding='5' style='border-collapse:collapse'>")
-                    .append("<tr><th>Reference</th><th>Severity</th><th>Defect</th><th>Scenarios</th></tr>");
+                    .append("<tr><th>Reference</th><th>Severity</th><th>Defect</th><th>Scenario numbers</th></tr>");
             for (Map.Entry<String, List<String>> e : refScenarios.entrySet()) {
                 Defect d = CATALOG.get(e.getKey());
                 sb.append("<tr><td>").append(TestReporter.esc(e.getKey())).append("</td><td>").append(d == null ? "-" : TestReporter.esc(d.severity)).append("</td><td>")
@@ -231,9 +252,9 @@ public final class ScenarioBoard {
         }
         if (!notPassed.isEmpty()) {
             sb.append("<br><b>Scenarios that did not pass (").append(notPassed.size()).append(")</b><div class='komp-scroll'><table class='komp-np' border='1' cellpadding='5' style='border-collapse:collapse'>")
-                    .append("<tr><th>Test case</th><th>Scenario</th><th>Status</th><th>Kind</th><th>Title</th><th>Defect</th></tr>");
+                    .append("<tr><th>Test case</th><th>Scenario no. (id)</th><th>Status</th><th>Kind</th><th>Title</th><th>Defect</th></tr>");
             for (Outcome o : notPassed) {
-                sb.append("<tr><td>").append(TestReporter.esc(o.tc)).append("</td><td>").append(TestReporter.esc(o.id)).append("</td><td>").append(o.verdict.badge()).append("</td><td>")
+                sb.append("<tr><td>").append(TestReporter.esc(o.tc)).append("</td><td>").append(TestReporter.esc(o.no > 0 ? o.no + " (" + o.id + ")" : o.id)).append("</td><td>").append(o.verdict.badge()).append("</td><td>")
                         .append(TestReporter.esc(o.kind.label)).append("</td><td>").append(TestReporter.esc(o.title)).append("</td><td>")
                         .append(TestReporter.esc(String.join(", ", o.defectRefs))).append("</td></tr>");
             }

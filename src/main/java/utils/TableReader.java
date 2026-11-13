@@ -24,7 +24,24 @@ public final class TableReader {
     /** The data rows of the table on the screen now (empty-state / loading rows have fewer than 4 cells and are left out). */
     @SuppressWarnings("unchecked")
     public static List<Map<String, String>> rows(WebDriver driver) {
-        Object o = ((JavascriptExecutor) driver).executeScript(ROWS_JS);
+        Object o = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                o = ((JavascriptExecutor) driver).executeScript(ROWS_JS);
+                break;
+            } catch (org.openqa.selenium.WebDriverException transientError) {
+                // while the list is being redrawn the browser can answer "cannot deserialize the result value" (seen right after an upload): read again a moment later
+                if (attempt == 3 || transientError instanceof org.openqa.selenium.NoSuchSessionException) {
+                    throw transientError;
+                }
+                try {
+                    Thread.sleep(1500); // documented: the list is redrawn after an upload / search
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw transientError;
+                }
+            }
+        }
         List<Map<String, String>> out = new ArrayList<>();
         if (o instanceof List) {
             for (Object r : (List<Object>) o) {

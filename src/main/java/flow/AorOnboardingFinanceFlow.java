@@ -19,6 +19,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
+import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.testng.Assert;
 
@@ -28,6 +29,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import model.AorEmployee;
 import model.AorRun;
 import pages.AorAgentsPage;
+import pages.AorListPage;
 import pages.DeleteWindow;
 import pages.AorDialog;
 import pages.AorInvoicesPage;
@@ -261,16 +263,51 @@ public class AorOnboardingFinanceFlow {
         }
         agents.dialog().dismiss();
         agents.open();
+        // every new employee is searched the way a user would look for him / her: first name, middle name (when there is one), last name, full name, delivery partner id, company employee id
+        // and e-mail address. A short name matches many agents, so every page of the answer is read; the employee must be among the rows (state, client and an id are checked as well).
+        AorListPage list = new AorListPage(driver, new AorListPage.Spec("AOR Agents", () -> { }, By.xpath("//main//input[@placeholder='Search by name or ID']"), new String[0], "STATUS", "CLIENT", null,
+                new String[0], new String[0], true, false));
         for (AorEmployee e : run.employees) {
-            List<Map<String, String>> found = agents.search(e.name);
-            Map<String, String> row = found.stream().filter(r -> String.join(" ", r.values()).contains(e.name)).findFirst().orElse(null);
-            String line = row == null ? "" : String.join(" | ", row.values());
-            boolean listed = row != null && line.contains(e.state) && line.contains(run.client)
-                    && (line.contains(e.companyEmployeeId) || line.contains(e.deliveryPartnerId));
-            c.check("Agent \"" + e.name + "\"", "Is in the list of AOR agents", listed,
-                    "listed with the state \"" + e.state + "\", the client \"" + run.client + "\" and the id \"" + e.companyEmployeeId + "\" or \"" + e.deliveryPartnerId + "\"",
-                    row == null ? "not found in the list (search: \"" + e.name + "\")" : line);
+            String[] part = e.name.trim().split("\s+");
+            String who = "Agent \"" + e.name + "\"";
+            Map<String, String> terms = new LinkedHashMap<>();
+            terms.put("first name", part[0]);
+            if (part.length > 2) {
+                terms.put("middle name", String.join(" ", java.util.Arrays.copyOfRange(part, 1, part.length - 1)));
+            }
+            terms.put("last name", part[part.length - 1]);
+            terms.put("full name", e.name);
+            terms.put("delivery partner id", e.deliveryPartnerId);
+            terms.put("company employee id", e.companyEmployeeId);
+            terms.put("e-mail address", e.personalEmail);
+            for (Map.Entry<String, String> term : terms.entrySet()) {
+                boolean emailOnly = term.getKey().startsWith("e-mail");
+                List<Map<String, String>> rows = list.search(term.getValue());
+                Map<String, String> row = findAgent(rows, e);
+                if (row == null && list.nextEnabled()) {
+                    rows = list.allRows(); // the employee is not on the first page of the answer
+                    row = findAgent(rows, e);
+                }
+                String line = row == null ? "" : String.join(" | ", row.values());
+                boolean listed = row != null && line.contains(e.state) && line.contains(run.client) && (line.contains(e.companyEmployeeId) || line.contains(e.deliveryPartnerId));
+                int total = list.total() >= 0 ? list.total() : rows.size();
+                String shown = row == null ? "not found among the " + total + " result(s) of the search for \"" + term.getValue() + "\""
+                        : "found among " + total + " result(s): " + line;
+                if (emailOnly && !listed) {
+                    // the search box says "Search by name or ID": an e-mail address is not promised, so a miss is only a note
+                    c.check(who + " > Search by " + term.getKey(), "The agent is found with \"" + term.getValue() + "\" (the box only promises name or ID: a miss is not a problem)", true,
+                            "found, or a note that the box does not search e-mail addresses", "not found - the search box does not search e-mail addresses");
+                    continue;
+                }
+                c.check(who + " > Search by " + term.getKey(), "The agent is found with \"" + term.getValue() + "\"", listed,
+                        "listed with the state \"" + e.state + "\", the client \"" + run.client + "\" and the id \"" + e.companyEmployeeId + "\" or \"" + e.deliveryPartnerId + "\"", shown);
+            }
         }
+    }
+
+    /** The row of the employee among the rows of a search answer (the full name and the state are in it), or null. */
+    private static Map<String, String> findAgent(List<Map<String, String>> rows, AorEmployee e) {
+        return rows.stream().filter(r -> String.join(" ", r.values()).contains(e.name)).findFirst().orElse(null);
     }
 
     /**
@@ -487,6 +524,113 @@ public class AorOnboardingFinanceFlow {
         payroll.reload(); // the windows of the next steps must offer the NEW session (see AorPayrollPage#reload)
     }
 
+    /** The terms a user would type to find an employee: first name, middle name (when there is one), last name, full name. */
+    private static Map<String, String> nameTerms(AorEmployee e) {
+        String[] part = e.name.trim().split("\\s+");
+        Map<String, String> terms = new LinkedHashMap<>();
+        terms.put("first name", part[0]);
+        if (part.length > 2) {
+            terms.put("middle name", String.join(" ", java.util.Arrays.copyOfRange(part, 1, part.length - 1)));
+        }
+        terms.put("last name", part[part.length - 1]);
+        terms.put("full name", e.name);
+        return terms;
+    }
+
+    /** The parts of a session id a user would type: the whole id, its first half and its last 5 characters. */
+    private static Map<String, String> sessionTerms(String sid) {
+        Map<String, String> terms = new LinkedHashMap<>();
+        terms.put("the whole session id", sid);
+        terms.put("the first half of the session id", sid.substring(0, sid.length() / 2));
+        terms.put("the last 5 characters of the session id", sid.substring(sid.length() - 5));
+        return terms;
+    }
+
+    /**
+     * FIN-13 - the payroll list is searched every way a user would: the session id (whole, first half, last 5 characters), the agent name (first, middle, last, full) and the
+     * employee id. The e-mail address is not searched here: a payroll entry belongs to a payout, not to a person's contact data. Every search must find what it should: all
+     * entries of the new session, or the entry of that employee in the new session (every page of the answer is read when needed).
+     */
+    public void searchPayrollEveryWay(ValueChecks c) {
+        if (run.sessionId == null) {
+            throw new org.testng.SkipException("Not run: the payroll session of this run is not known (the step before did not find it).");
+        }
+        payroll.open();
+        payroll.filterDates(runDate(), runDate());
+        payroll.setPageSize(10);
+        for (Map.Entry<String, String> term : sessionTerms(run.sessionId).entrySet()) {
+            payroll.search(term.getValue());
+            List<Map<String, String>> rows = payroll.rows();
+            long mine = rows.stream().filter(r -> run.sessionId.equals(TableReader.column(r, "SESSION ID"))).count();
+            if (mine < run.employees.size()) {
+                rows = payroll.allRows();
+                mine = rows.stream().filter(r -> run.sessionId.equals(TableReader.column(r, "SESSION ID"))).count();
+            }
+            c.check("Payroll list > Search by " + term.getKey(), "Finds all entries of the new session (search: \"" + term.getValue() + "\")", mine == run.employees.size(),
+                    run.employees.size() + " entries of the session " + run.sessionId, mine + " entries of the session among " + PlainText.count(rows.size(), "result", "results") + " (" + payroll.showing() + ")");
+        }
+        rep.evidence("payroll_search_session", "The payroll list searched with the last 5 characters of the session id");
+        for (AorEmployee e : run.employees) {
+            Map<String, String> terms = nameTerms(e);
+            terms.put("employee id", e.deliveryPartnerId);
+            for (Map.Entry<String, String> term : terms.entrySet()) {
+                payroll.search(term.getValue());
+                List<Map<String, String>> rows = payroll.rows();
+                boolean found = rows.stream().anyMatch(r -> e.name.equals(TableReader.column(r, "AGENT NAME")) && run.sessionId.equals(TableReader.column(r, "SESSION ID")));
+                if (!found) {
+                    rows = payroll.allRows();
+                    found = rows.stream().anyMatch(r -> e.name.equals(TableReader.column(r, "AGENT NAME")) && run.sessionId.equals(TableReader.column(r, "SESSION ID")));
+                }
+                c.check("Payroll list > \"" + e.name + "\" > Search by " + term.getKey(), "Finds the entry of the employee in the new session (search: \"" + term.getValue() + "\")", found,
+                        "an entry of \"" + e.name + "\" in the session " + run.sessionId, found ? "found among " + PlainText.count(rows.size(), "result", "results") : "not found among "
+                                + PlainText.count(rows.size(), "result", "results") + " (" + payroll.showing() + ")");
+            }
+        }
+        payroll.search("");
+        payroll.reload(); // the windows of the next steps must offer the NEW session (see AorPayrollPage#reload)
+    }
+
+    /**
+     * INV-05 - the Invoice tab is searched every way that fits it: the session id (whole, first half, last 5 characters), the invoice number (whole, its first part, its last part)
+     * and the client name. An invoice belongs to a state and a session, not to one employee, so names and e-mail addresses are not searched here. Every search must list the
+     * invoice of the new session (every page of the answer is read when needed).
+     */
+    public void searchInvoicesEveryWay(ValueChecks c) {
+        if (run.sessionId == null) {
+            throw new org.testng.SkipException("Not run: the payroll session of this run is not known (an earlier step did not find it).");
+        }
+        invoices.open();
+        Map<String, String> terms = new LinkedHashMap<>(sessionTerms(run.sessionId));
+        List<Map<String, String>> first = invoices.search(run.sessionId);
+        Map<String, String> mine = first.stream().filter(r -> run.sessionId.equals(TableReader.column(r, "SESSION ID"))).findFirst().orElse(null);
+        String invoiceNo = mine == null ? "" : TableReader.column(mine, "INVOICE ID");
+        if (!invoiceNo.isEmpty()) {
+            terms.put("the whole invoice number", invoiceNo);
+            int slash = invoiceNo.lastIndexOf('/');
+            if (slash > 0) {
+                terms.put("the first part of the invoice number", invoiceNo.substring(0, slash));
+                terms.put("the last part of the invoice number", invoiceNo.substring(slash + 1));
+            }
+        }
+        terms.put("client name", run.client);
+        for (Map.Entry<String, String> term : terms.entrySet()) {
+            List<Map<String, String>> rows = invoices.search(term.getValue());
+            boolean found = rows.stream().anyMatch(r -> run.sessionId.equals(TableReader.column(r, "SESSION ID")));
+            if (!found) {
+                rows = invoices.allRows();
+                found = rows.stream().anyMatch(r -> run.sessionId.equals(TableReader.column(r, "SESSION ID")));
+            }
+            c.check("Invoice tab > Search by " + term.getKey(), "Finds the invoice of the new session (search: \"" + term.getValue() + "\")", found,
+                    "the invoice of the session " + run.sessionId, found ? "found among " + PlainText.count(rows.size(), "result", "results") : "not found among "
+                            + PlainText.count(rows.size(), "result", "results") + " (" + invoices.showing() + ")");
+        }
+        if (invoiceNo.isEmpty()) {
+            c.check("Invoice tab > Invoice of the new session", "Is listed with its invoice number", false, "an invoice row with the session " + run.sessionId, "no invoice row found for this session");
+        }
+        rep.evidence("invoice_search_session", "The Invoice tab searched by the session id");
+        invoices.search("");
+    }
+
     /**
      * Section 9 - Download Bank Sheet: same client, project, dates and payroll session; the file is saved in Downloads/AOR with a run-specific name. The file is
      * opened and checked: every employee of the session is in it with the bank account and IFSC code of the employee workbook, and nobody else.
@@ -518,7 +662,6 @@ public class AorOnboardingFinanceFlow {
                 twice.isEmpty() ? "one row per employee" : "listed more than once: " + PlainText.some(twice, 4));
         c.check("Bank Sheet", "ASSUMPTION, not a confirmed rule (pending the client / finance team): each amount is the final payout of the SELECTED session less 1% - seen in every run", wrongAmount.isEmpty(), "the final payout of this session less 1% for every employee",
                 wrongAmount.isEmpty() ? "every amount matches" : "different amount: " + PlainText.some(wrongAmount, 4));
-        c.check("Bank Sheet", "The number of rows equals the number of employees of the session", rows.size() == run.employees.size(), run.employees.size() + " rows", rows.size() + " rows");
         List<String> others = new ArrayList<>();
         for (Map<String, String> r : rows) {
             if (run.employees.stream().noneMatch(e -> e.name.equals(r.get("beneficiary name")))) {
@@ -533,9 +676,11 @@ public class AorOnboardingFinanceFlow {
                     + "Expected: only the " + PlainText.count(run.employees.size(), "employee", "employees") + " of the selected session. "
                     + "Actual: " + PlainText.count(rows.size(), "row", "rows") + ", including " + PlainText.count(others.size(), "payee", "payees") + " of other sessions: " + PlainText.some(others, 8) + ".");
         }
-        c.check("Bank Sheet", "Contains only the employees of the selected payroll session", others.isEmpty(),
-                "only the " + PlainText.count(run.employees.size(), "employee", "employees") + " of the session " + run.sessionId,
-                others.isEmpty() ? "only those employees" : "also " + PlainText.count(others.size(), "other payee", "other payees") + " who are not in this session: " + PlainText.some(others, 6));
+        boolean exact = others.isEmpty() && rows.size() == run.employees.size();
+        c.check("Bank Sheet", "Lists only the employees of the selected payroll session (one row each)", exact,
+                "only the " + PlainText.count(run.employees.size(), "employee", "employees") + " of the session " + run.sessionId + " (" + run.employees.size() + " rows)",
+                exact ? "only those employees (" + rows.size() + " rows)"
+                        : rows.size() + " rows" + (others.isEmpty() ? "" : ", including " + PlainText.count(others.size(), "other payee", "other payees") + " who are not in this session: " + PlainText.some(others, 6)));
     }
 
     /** The amount of the Bank Sheet: the final payout less 1% (verified on 2490 -> 2465.10, 4572 -> 4526.28, 5595 -> 5539.05, 7450 -> 7375.50). */

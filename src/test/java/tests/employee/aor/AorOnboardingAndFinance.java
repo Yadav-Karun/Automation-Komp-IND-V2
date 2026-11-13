@@ -150,6 +150,8 @@ public class AorOnboardingAndFinance extends BaseTest {
                 "The application accepts the Payee Sheet and answers with the result", flow::uploadPayeeSheet);
         rep.phaseChecks("tc_aor_02_payroll_entries", "Check the entries in the payroll list (FIN-12)",
                 "Every employee has an entry for the run date with the right hub, state, employee id and payout, all in one new payroll session", flow::verifyPayeeEntries);
+        rep.phaseChecks("tc_aor_02_payroll_search", "Search the payroll list every way: session id (whole, first half, last 5 characters), agent name (first, middle, last, full) and employee id (FIN-13)",
+                "Every search finds the entries of the new session, or the entry of that employee in the new session", flow::searchPayrollEveryWay);
         rep.phaseChecks("tc_aor_02_bank_sheet", "Download the Bank Sheet for the payroll session and check it",
                 "The Bank Sheet is saved in the folder Downloads/AOR, opens, and lists the employees of the session with their bank details and nobody else", flow::downloadBankSheet);
         rep.phaseChecks("tc_aor_02_da_invoices", "Download the DA Invoices for the payroll session and check them (INV-01, INV-02)",
@@ -163,6 +165,8 @@ public class AorOnboardingAndFinance extends BaseTest {
         // INVOICE TAB: the combined grand total over all state-wise invoice amounts - no employee-wise matching
         rep.phaseChecks("tc_aor_02_invoice_total", "Invoice tab: refresh the report, download it and compare the combined grand total",
                 "The sum of all state-wise invoice amounts of the generated payroll session(s) equals the Payee Sheet grand total, difference 0", flow::invoiceTabGrandTotal);
+        rep.phaseChecks("tc_aor_02_invoice_search", "Search the Invoice tab every way: session id (whole, first half, last 5 characters), invoice number (whole, first part, last part) and client name (INV-05)",
+                "Every search lists the invoice of the new payroll session", flow::searchInvoicesEveryWay);
         // DELETE: Payroll and Invoice must stay in step. Only sessions created by this run are touched.
         rep.phaseChecks("tc_aor_02_second_pay_sheet", "Second payroll session for the delete check: prepare the Payee Sheet again (same employees)",
                 "A second Payee Sheet with the same employees is written", flow::prepareSecondPayeeSheet);
