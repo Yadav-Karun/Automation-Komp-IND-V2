@@ -1,0 +1,13 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- EMPLOYEE - EOR ONBOARDING, HAPPY FLOW (positive path only). One test class = one report folder named after the class.
+     TC-EOR-01 bulk upload of new EOR employees; TC-EOR-02 every employee accepts the Letter of Intent and fills the candidate portal; TC-EOR-03 the administrator verifies
+     and sends the offer letter; TC-EOR-04 every employee accepts the offer; TC-EOR-05 mark as joined, the employees are Active.
+     Creates TWO new employees per run (user, 2026-11-13: the first is a Fresher, the second Experienced; -Deor.employees=N, 1 to 5); they cannot be deleted by automation.
+     Run:  mvn clean test -Dsuite=testng-eor-onboarding.xml -->
+<suite name="KOMP IND Testing - Employee EOR" verbose="1" parallel="none">
+    <test name="EOR Employee Onboarding (happy flow)">
+        <classes>
+            <class name="tests.employee.eor.EOROnboarding"/>
+        </classes>
+    </test>
+</suite>

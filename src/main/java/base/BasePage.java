@@ -62,6 +62,7 @@ public abstract class BasePage {
                     if (els.isEmpty() || !els.get(0).isDisplayed() || !els.get(0).isEnabled()) {
                         return false;
                     }
+                    utils.SmoothScroll.to(driver, els.get(0)); // the page glides to the button, so that the person watching sees what is clicked
                     els.get(0).click();
                     return true;
                 } catch (ElementNotInteractableException e) {
@@ -79,6 +80,7 @@ public abstract class BasePage {
 
     protected void type(By by, String text) {
         WebElement e = visible(by);
+        utils.SmoothScroll.to(driver, e);
         if (!valueOf(e).isEmpty()) {
             e.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.BACK_SPACE);
         }
@@ -103,7 +105,7 @@ public abstract class BasePage {
     }
 
     protected void scrollIntoView(By by) {
-        ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'})", visible(by));
+        utils.SmoothScroll.to(driver, visible(by));
     }
 
     /** Radix select: open trigger, pick option by visible text, wait for the list to close. */

@@ -1,0 +1,13 @@
+# EOR e-mail addresses used by the EOR happy flow: e-mail | run id | date time (an address in this file is never generated again)
+karanmenon.M@yopmail.com | EOR-20261112-1109 | 2026-11-12 11:10:04 am
+ajaytiwari.m@yopmail.com | EOR-20261112-1112 | 2026-11-12 11:12:49 am
+nishachauhan.f@yopmail.com | EOR-20261112-1213 | 2026-11-12 12:13:33 pm
+karansingh.m@yopmail.com | EOR-20261112-1213 | 2026-11-12 12:13:33 pm
+swatigupta.f@yopmail.com | EOR-20261113-1438 | 2026-11-13 02:38:25 pm
+aditimenon.f@yopmail.com | EOR-20261113-1438 | 2026-11-13 02:38:25 pm
+harshgupta.m@yopmail.com | EOR-20261113-1438 | 2026-11-13 02:38:25 pm
+vihaangupta.m@yopmail.com | EOR-20261113-1438 | 2026-11-13 02:38:25 pm
+nishagupta.f@yopmail.com | EOR-20261113-1438 | 2026-11-13 02:38:25 pm
+gauravrao.m@yopmail.com | EOR-20261113-1442 | 2026-11-13 02:42:26 pm
+sameermalhotra.m@yopmail.com | EOR-20261113-1445 | 2026-11-13 02:45:32 pm
+riyapillai.f@yopmail.com | EOR-20261113-1445 | 2026-11-13 02:45:32 pm

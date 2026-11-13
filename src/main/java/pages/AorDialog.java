@@ -373,7 +373,7 @@ public class AorDialog extends BasePage {
             throw new AssertionError("The list has no entry '" + what + "' (entries: " + readOptions() + ").");
         }
         WebElement e = found.get(0);
-        ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'})", e);
+        utils.SmoothScroll.to(driver, e);
         pause(300); // the list has to stop moving before the click
         try {
             e.click();

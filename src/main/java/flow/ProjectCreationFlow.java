@@ -89,9 +89,9 @@ public class ProjectCreationFlow {
     /** Step 1 - sign in as the EOR user; the dashboard (sidebar with the Projects tab) is displayed. */
     public String signIn() {
         login.freshLogin(ConfigManager.baseUrl());
-        login.login(ConfigManager.eorEmail(), ConfigManager.eorPassword());
+        login.login(ConfigManager.adminEmail(), ConfigManager.adminPassword());
         Assert.assertTrue(projects.menuVisible(), "Step 1 failed: the dashboard is not displayed after the login (sidebar tab 'Projects' is missing).");
-        return "Login accepted for " + SecretMasker.maskEmail(ConfigManager.eorEmail()) + "; the dashboard is displayed (sidebar tab 'Projects' visible) at "
+        return "Login accepted for " + SecretMasker.maskEmail(ConfigManager.adminEmail()) + "; the dashboard is displayed (sidebar tab 'Projects' visible) at "
                 + driver.getCurrentUrl();
     }
 
@@ -308,7 +308,7 @@ public class ProjectCreationFlow {
 
     /** The line under the case title: the type, the signed-in user (no password) and the data generated so far. */
     public static String headline(ProjectData d) {
-        StringBuilder sb = new StringBuilder("Project type: ").append(d.type).append(" | signed in as ").append(SecretMasker.maskEmail(ConfigManager.eorEmail()));
+        StringBuilder sb = new StringBuilder("Project type: ").append(d.type).append(" | signed in as ").append(SecretMasker.maskEmail(ConfigManager.adminEmail()));
         if (d.clientName == null) {
             return sb.append(" | test data is generated in step 5-7 (seed ").append(d.seed).append(")").toString();
         }

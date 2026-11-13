@@ -665,3 +665,52 @@ mvn clean test -Dsuite=testng-aor-onboarding-finance.xml -Dcases=TC-AOR-02 -Daor
   entries from the start. A journey / happy flow stays ONE case with its phases (its phases depend on each other); an independent check must be its own scenario entry.
 - **API calls** of every entry are recorded in full (`-Dcapture.api.full=false` switches it off): endpoint, method, URL, headers, payload, status, response body, timestamps, duration -> folded node "API calls observed (n)" + `api-evidence/`.
   Per the user's decision nothing is masked in these records (passwords, tokens, Aadhaar, PAN, bank accounts) except with `-Dmask.secrets=true`; a production run always masks.
+
+## 13. Employee - EOR onboarding (`tests.employee.eor`) - happy flow only
+
+Folder `src/test/java/tests/employee/eor/`, class `EOROnboarding`, suite `testng-eor-onboarding.xml`, reports `reports/EOROnboarding/<run>/` (+ `uploads/` with the workbook, `eor-run-data.json` without passwords).
+**Five cases in order, each needs the one before**: TC-EOR-01 bulk upload (admin: Employees > EOR > Bulk Upload, every employee found in Candidates), TC-EOR-02 every employee accepts the Letter of Intent from the
+Yopmail mail, reads the "Candidate Login" password and fills the candidate portal, TC-EOR-03 admin verifies (Employees > EOR > View > Verify) and sends the offer letter (Candidates), TC-EOR-04 every employee accepts the
+offer, TC-EOR-05 Mark as Joined and the employee is Active in Employees > EOR. An employee whose step failed is left out of the later steps, the others go on.
+```bash
+mvn clean test -Dsuite=testng-eor-onboarding.xml                    # TWO new employees (user, 2026-11-13: the 1st a Fresher, the 2nd Experienced; -Deor.employees=N, 1..5)
+# tuning on ONE employee that was uploaded earlier and has accepted the Letter of Intent (no new employee; the later cases start where the earlier run stopped):
+mvn clean test -Dsuite=testng-eor-onboarding.xml "-Deor.existing=<e-mail>|<password>" -Dcases=TC-EOR-02      # or TC-EOR-03,TC-EOR-04,TC-EOR-05
+```
+- **Data:** the QA owner's template `employeeBulkUploadExcelPath` (config/documents.properties) is only COPIED; its first sheet's example row (client "Dragon Ball Z", project, manager, salary, formulas) is repeated per employee and only
+  State, names, Gender, Email, Work Experience, Mobile, Working Location, End Client, Designation, Job Description are replaced (`utils/EorWorkbooks`, `utils/EorDataGenerator`; the first employee is Experienced, the second a Fresher,
+  so both paths run). **E-mail addresses and the login are ALL LOWER CASE** (`firstnamelastname.m|f@yopmail.com`, user 2026-11-12); used addresses are kept in `testdata/eor-used-emails.txt`. Login = `ConfigManager.eorEmail()/eorPassword()`.
+- **Candidate portal rules (user, 2026-11-12):** saved data stays and can be edited; a section whose key field already holds a value is only "Save & Continue"d (when that button is enabled); the permanent address is either the box
+  "Permanent address is the same as current address" ticked (employee 1, 3, 5) or a separate address (employee 2, 4); an experienced employee fills "Work Experience" (previous employer, designation, joining MONTH (`type=month`), last working
+  date, key responsibilities, document); every drop-down (Country -> State -> City load slowly) is closed and opened again when the entry does not appear (`chooseAt`, `-Deor.dropdown.attempts`); an already attached document shows a preview instead of a file box (skipped);
+  the toast "... saved." can cover "Save & Continue" (toasts are closed, then a JavaScript click as fallback). The steps of the left menu unlock one after the other, so every run walks Personal > Contact > Banking > Professional > Education > Identification.
+- **Lessons:** the Candidates list has a column "LOI STATUS" AND "OFFER LETTER": wait on the right column (`columnShows`), "Accepted" in LOI STATUS is not the offer; after "Accept Offer" wait for "You have accepted this offer" (the first click can do nothing while the contract preview loads);
+  the panel "Creating Bulk Employees" stays on the page after an upload and covers the sidebar (dismiss it); the Yopmail subject fragments are "Letter of intent" and "Candidate Login".
+
+- **Added 2026-11-13 (after joining):** TC-EOR-06 = Employees > EOR > eye button (title "View"; a candidate before verification has Actions > View instead): "Unmask all" first (user rule), then every tab (Personal & Contact, Professional,
+  Statutory Details, Documents, Employment Documents) compared with what was entered (`flow/EorProfileChecks`, ~80 values per employee). TC-EOR-07 = every block of every tab has an Edit button (shown on hover only: found / clicked by script):
+  every changeable value is changed (digits count up, " Ed" suffix toggled, another list entry; NOT gender, nationality, e-mail, work experience, files, marital status; **the country is always India**, a country that is not India is set back to India),
+  Submit, and the profile must show the new value (it is read for up to 8 s, then after a reload: "the old values stayed on the page until it was loaded again" is a recorded finding, seen in a different block on most runs).
+  TC-EOR-08 = Employees > EOR search shows the changed values, MSA & Contract > Contract (`/contracts/eor`): list row, contract page, Salary Breakup after "Unmask all" (compared with the workbook row), Edit Contract step 1, "Save & Continue", step 2
+  (step 3 Letter of Intent is NOT opened, nothing is saved on step 2). `-Deor.run.data=<eor-run-data.json>` runs TC-EOR-06..08 on the employees of an earlier run (TC-EOR-08 needs the data saved by TC-EOR-07: names / designation / joining date).
+  **Rate limit (user, 2026-11-12):** "Too many sign-in attempts" is not waited out: the browser is closed and a new one opened (`RateLimitedLogin`, `BaseTest.restartBrowser`, `EorOnboardingFlow.withRestart`).
+  **Yopmail** can put a Cloudflare window "Please confirm you're human" over the inbox: `EorMailbox` waits up to `-Dyopmail.human.wait.seconds` (300) for it to clear or to be clicked by the person watching; it is not bypassed.
+  **Not built yet:** TC-EOR-09 (Yopmail "Welcome Aboard - Your Employee Login Details" mail, employee login, check of the profile, upload of the dummy documents - the maternity form only for a female employee) and TC-EOR-10
+  (admin: Employees > EOR > View > Documents shows the uploaded documents): the mailbox was blocked by the human check when this was started.
+- **Accounts (user, 2026-11-13):** EOR employee onboarding and everything done / checked for EOR runs with the EOR user (`sandbox.eor.email / password` in config/secrets.local.properties = karun.yadav.eor@yopmail.com), AOR with the AOR user
+  (`sandbox.aor.*`), **client and project tests with the administrator** (`ConfigManager.adminEmail()/adminPassword()`; the client / project flows no longer use `eorEmail()`). The report header shows who signed in (`ExtentManager.addLogins`).
+  Seen with the EOR user: the contract page has NO "Salary Breakup" part (the administrator's has it) - recorded as a finding by `verifyContract`.
+- **Mask and unmask (user, 2026-11-13: test it wherever it appears, EOR and AOR):** EOR profile (`EorOnboardingFlow.checkMasking`, first part of every profile check): phone numbers, account numbers, Aadhaar, PAN are hidden at first (X characters), "Unmask all" shows them in
+  full (same length, the visible digits equal), "Mask all" hides them again, the eye button "Show Account No" shows only that value; the contract's Salary Breakup is hidden until its own "Unmask all" and hidden again by "Mask all". The AOR agent profile
+  has NO mask controls (verified 2026-11-13: values are shown in clear), so there is nothing to test there; if a mask control appears in AOR, add the same cycle.
+- **Yopmail human check:** it is NOT bypassed (a side-channel read of Yopmail was refused by the tool permissions as bot-check circumvention): `EorMailbox` waits for the check to clear or to be clicked by the person watching. TC-EOR-02 and the not yet built TC-EOR-09 need the mailbox.
+- **Smooth scrolling (user feedback 2026-11-13: "you don't scroll while testing, the user can't see what is going on"):** `utils/SmoothScroll`: every click / type of `BasePage` and every former `scrollIntoView` call glides to the element (centre of the window,
+  waits until the page stands still, skipped when the element is already well inside the window); `SmoothScroll.tour(driver)` glides to the bottom and back to the top of a long page: used on every profile tab and the contract pages.
+  Write new page objects with `SmoothScroll.to / click`, never a bare `scrollIntoView`. `-Dscroll.smooth=false` = instant jumps, `-Dscroll.tour=false` = no tours (faster runs).
+- **Complete negative / edge set of the AOR edge class (user 2026-11-13: "complete negative and edge testing including strings and integers"; written, compiled, NOT yet run):** TC-AOR-EDGE-01 gained C1-C4 (client / project name: empty, spaces, unknown, other client,
+  case, symbols, script, SQL, very long; sheet named after an unknown client), T1-T16 (digits columns with 19 kinds of numbers / strings: negative, decimal, exponent, hex, thousands separator, Arabic / Devanagari / full-width digits, booleans, formulas, NaN / null;
+  text columns with numbers, formulas, dates, markup, template and path injections, 256 - 32000 characters, tab / line break / zero-width / right-to-left; dates, e-mail, IFSC, PAN, Aadhaar, account number), D1-D4 + D10-D15 (duplicate Aadhaar / PAN / driving licence
+  with an onboarded employee and inside one file), B1-B8 (age and date boundaries; exactly 18 and a leap day must be accepted), V03-V06 (valid edge values), HM-<column> (every required column missing, one scenario each), H1-H2 (duplicate heading, no heading row).
+  TC-AOR-EDGE-02 gained Q20-Q5x (FHRID, final payout, Wm name, state, hub with the same kinds of values) and P06-P09 (pay period without start / end, in 1900, three years). Every value in an anchored batch must be REFUSED: a value that is legally valid
+  belongs in a `single(..., true)` scenario. New defect reference AOR-D11 (client / project not checked). Not yet covered: search / filters / paging / sort / columns of the AOR Agents, Payroll and Invoice lists (needs a recon of those screens first),
+  and the same Payee Sheet uploaded twice.

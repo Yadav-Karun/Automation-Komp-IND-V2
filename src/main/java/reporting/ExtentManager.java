@@ -83,8 +83,14 @@ public final class ExtentManager {
         if (!ExecutionInfo.isClientModule()) {
             // the brief of the other modules: never a password in a report. The e-mail of the account that ran the test is enough to know who it was.
             try {
-                boolean aor = ExecutionInfo.module().startsWith("Employee-AOR");
-                e.setSystemInfo(aor ? "Signed in as (AOR user)" : "Signed in as (EOR user)", aor ? ConfigManager.aorEmail() : ConfigManager.eorEmail());
+                String module = ExecutionInfo.module();
+                if (module.startsWith("Employee-AOR")) {
+                    e.setSystemInfo("Signed in as (AOR user)", ConfigManager.aorEmail());
+                } else if (module.startsWith("Employee-EOR")) {
+                    e.setSystemInfo("Signed in as (EOR user)", ConfigManager.eorEmail());
+                } else {
+                    e.setSystemInfo("Signed in as (administrator)", ConfigManager.adminEmail());
+                }
             } catch (RuntimeException ex) {
                 // not configured: the report simply does not list it
             }

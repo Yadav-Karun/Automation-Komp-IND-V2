@@ -131,7 +131,30 @@ public class AorAgentsPage extends BasePage {
 
     /** Leaves the profile: "Back to AOR Agents". */
     public void backToList() {
-        click(By.xpath("//*[normalize-space()='Back to AOR Agents']"));
+        // the button is looked for among ALL matches (a hidden copy can come first); when it cannot be clicked the sidebar entry AOR leads back to the list
+        By back = By.xpath("//*[normalize-space()='Back to AOR Agents']");
+        boolean clicked = false;
+        for (int i = 0; i < 10 && !clicked; i++) {
+            for (org.openqa.selenium.WebElement e : driver.findElements(back)) {
+                try {
+                    if (e.isDisplayed()) {
+                        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("arguments[0].click()", e);
+                        clicked = true;
+                        break;
+                    }
+                } catch (org.openqa.selenium.StaleElementReferenceException redrawn) {
+                    // found again on the next round
+                }
+            }
+            if (!clicked) {
+                pause(500);
+            }
+        }
+        if (!clicked) {
+            utils.Log.warn("The button \"Back to AOR Agents\" was not found: the list is opened through the menu.");
+            open();
+            return;
+        }
         visible(heading);
     }
 

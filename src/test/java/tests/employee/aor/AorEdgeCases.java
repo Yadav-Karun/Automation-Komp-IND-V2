@@ -252,6 +252,94 @@ public class AorEdgeCases extends BaseTest {
                             x -> a("personal email id", "user@yopmail", "ifsc code", null, "account number", null, "da status", "ACTIVE")),
                     spec("e-mail with accents; account of zeros", x -> a("personal email id", "üser@yopmail.com", "account number", "0000000000"))));
 
+            // =============================================== COMPLETE NEGATIVE / EDGE SET (user, 2026-11-13). Zero cost: every row also carries the anchor (a wrong value that the application refuses),
+            // so nobody can be created; a value that the application does not name was accepted.
+            // ---- client and project
+            batch("C1", "Client name: empty, spaces, unknown, another client, other case, spaces around, symbols, script, SQL, very long (14 rows)", variants("client name",
+                    null, "   ", "No Such Client 12345", "Dragon Ball Z", "BLEACH", "bleach", "Bleach ", " Bleach", "Ble ach", "Bleach<script>alert(1)</script>", "Bleach'; DROP TABLE clients;--",
+                    "B".repeat(300), "12345", "Bleach\tBleach"));
+            batch("C2", "Project name: empty, spaces, unknown, project of another client, other case, spaces, symbols, script, SQL, very long (13 rows)", variants("project name",
+                    null, "   ", "No Such Project 12345", "DBZ Frieza Saga", "THE SUBSTITUTE SHINIGAMI", "the substitute shinigami", "The Substitute Shinigami ", "The Substitute  Shinigami",
+                    "<script>alert(1)</script>", "x'; DROP TABLE projects;--", "P".repeat(300), "12345", "The Substitute Shinigami\nBleach"));
+            batch("C3", "Client and project together: missing, swapped, unknown, not belonging together (7 rows)", List.of(
+                    spec("project of another client", x -> a("client name", "Bleach", "project name", "DBZ Frieza Saga")),
+                    spec("client without project", x -> a("client name", "Bleach", "project name", null)),
+                    spec("project without client", x -> a("client name", null, "project name", "The Substitute Shinigami")),
+                    spec("client and project swapped", x -> a("client name", "The Substitute Shinigami", "project name", "Bleach")),
+                    spec("both unknown", x -> a("client name", "No Such Client", "project name", "No Such Project")),
+                    spec("both blank", x -> a("client name", null, "project name", null)),
+                    spec("both only spaces", x -> a("client name", "   ", "project name", "   "))));
+            columnScenario("C4", "The sheet carries the name of an unknown client (\"No Such Client\")", "client", w -> AorWorkbooks.renameSheet(w, "No Such Client"), true);
+
+            // ---- strings and integers: every kind of value in the columns that hold digits and in the columns that hold text
+            batch("T1", "Contact number: numbers and strings of every kind (19 rows)", variants("contact number", INT_ODD));
+            batch("T2", "Aadhaar number: numbers and strings of every kind (19 rows)", variants("aadhar number", INT_ODD));
+            batch("T3", "Manager contact number: numbers and strings of every kind (19 rows)", variants("manager contact number", INT_ODD));
+            batch("T4", "Bank account number: numbers and strings of every kind (16 rows)", variants("account number", ACCOUNT_ODD));
+            batch("T5", "Name: numbers, booleans, formulas, dates, markup, template and path text (20 rows)", variants("name", TEXT_ODD));
+            batch("T6", "Father name: numbers, booleans, formulas, dates, markup, template and path text (20 rows)", variants("father name", TEXT_ODD));
+            batch("T7", "Bank name: numbers, booleans, formulas, dates, markup, template and path text (20 rows)", variants("bank name", TEXT_ODD));
+            batch("T8", "Date of birth: impossible dates, text, numbers, times (15 rows)", variants("date of birth", DATE_ODD));
+            batch("T9", "Date of joining: impossible dates, text, numbers, times (15 rows)", variants("date of joining", DATE_ODD));
+            batch("T10", "Date of onboarding: impossible dates, text, numbers, times (15 rows)", variants("date of onboarding", DATE_ODD));
+            batch("T11", "E-mail address: every wrong form (15 rows)", variants("personal email id", EMAIL_ODD));
+            batch("T12", "IFSC code: wrong case, length, fifth character, symbols, wide letters (11 rows)", variants("ifsc code", IFSC_ODD));
+            batch("T13", "PAN number: right pattern but impossible content, wide letters, accents (8 rows)", variants("pan number", PAN_ODD));
+            batch("T14", "Aadhaar number: twelve digits that are no real Aadhaar number (6 rows)", variants("aadhar number", AADHAAR_ODD));
+            batch("T15", "Text lengths far over any limit: name, father name, bank name, hub location, address (8 rows)", List.of(
+                    spec("name of 256 characters", x -> a("name", "N".repeat(256))),
+                    spec("name of 1000 characters", x -> a("name", "N".repeat(1000))),
+                    spec("father name of 256 characters", x -> a("father name", "F".repeat(256))),
+                    spec("bank name of 256 characters", x -> a("bank name", "B".repeat(256))),
+                    spec("hub location of 256 characters", x -> a("hub location", "H".repeat(256))),
+                    spec("address of 4000 characters", x -> a("address", "A".repeat(4000))),
+                    spec("address of 32000 characters", x -> a("address", "A".repeat(32000))),
+                    spec("name, father name and bank name of 300 characters each", x -> a("name", "N".repeat(300), "father name", "F".repeat(300), "bank name", "B".repeat(300)))));
+            batch("T16", "Hidden and control characters in text: tab, line break, zero-width space, right-to-left text (6 rows)", List.of(
+                    spec("name with a tab", x -> a("name", "John\tDoe")),
+                    spec("name with a line break", x -> a("name", "John\nDoe")),
+                    spec("name with a zero-width space", x -> a("name", "John\u200BDoe")),
+                    spec("name with right-to-left text", x -> a("name", "\u202EJohn Doe")),
+                    spec("father name with a line break", x -> a("father name", "Ram\nKumar")),
+                    spec("bank name with a tab", x -> a("bank name", "HDFC\tBank"))));
+
+            // ---- duplicates inside one file (two rows) and with an onboarded employee (cost 1 each when accepted)
+            sameFileColumn("D10", "Two rows of one file with the same Aadhaar number", "aadhar number", x -> x.aadhaar);
+            sameFileColumn("D11", "Two rows of one file with the same PAN number", "pan number", x -> x.pan);
+            sameFileColumn("D12", "Two rows of one file with the same e-mail address", "personal email id", x -> x.personalEmail);
+            sameFileColumn("D13", "Two rows of one file with the same contact number", "contact number", x -> x.contactNumber);
+            sameFileColumn("D14", "Two rows of one file with the same bank account number", "account number", x -> x.accountNumber);
+            sameFileColumn("D15", "Two rows of one file with the same driving licence number", "driving licence number", x -> x.drivingLicence);
+            single("D1", "Aadhaar number of an onboarded employee", "aadhaar|aadhar", x -> m("aadhar number", run == null ? "999999999999" : run.employees.get(0).aadhaar));
+            single("D2", "PAN number of an onboarded employee", "pan", x -> m("pan number", run == null ? "ABCDE1234F" : run.employees.get(0).pan));
+            single("D3", "Driving licence number of an onboarded employee", "licence|license", x -> m("driving licence number", run == null ? "DL0000000000" : run.employees.get(0).drivingLicence));
+            single("D4", "Aadhaar of one onboarded employee and PAN of another one", "aadhaar|aadhar|pan", x -> m("aadhar number", run == null ? "999999999999" : run.employees.get(0).aadhaar,
+                    "pan number", run == null || run.employees.size() < 2 ? "ABCDE1234F" : run.employees.get(1).pan));
+
+            // ---- dates and ages at the edge (a valid edge value must be accepted, an impossible one refused)
+            single("B1", "Date of birth today (a newborn)", "birth|age", x -> m("date of birth", LocalDate.now().format(XL)));
+            single("B2", "Date of birth 120 years ago", "birth|age", x -> m("date of birth", LocalDate.now().minusYears(120).format(XL)));
+            single("B3", "Date of birth on 1 January 1900", "birth|age", x -> m("date of birth", "01-Jan-1900"));
+            single("B4", "Date of onboarding one day before the date of joining", "onboarding|joining", x -> m("date of onboarding", LocalDate.parse(x.joiningDate).minusDays(1).format(XL)));
+            single("B5", "Date of joining before the 18th birthday (age 10 at joining)", "joining|birth|age", x -> m("date of joining", LocalDate.parse(x.birthDate).plusYears(10).format(XL)));
+            single("B6", "Exactly 18 years old today (the lowest valid age)", "", x -> m("date of birth", LocalDate.now().minusYears(18).format(XL), "date of joining", LocalDate.now().format(XL),
+                    "date of onboarding", LocalDate.now().format(XL)), true); // joining and onboarding on the 18th birthday (joining a year earlier would make him 17 at joining)
+            single("B7", "Born on 29 February 1996 (a leap day)", "", x -> m("date of birth", "29-Feb-1996"), true);
+            single("B8", "Date of onboarding on the same day as the date of joining", "", x -> m("date of onboarding", LocalDate.parse(x.joiningDate).format(XL)), true);
+
+            // ---- valid edge values (they must be accepted)
+            single("V03", "Contact number that starts with 9 (the highest valid start)", "", x -> m("contact number", "9999999999"), true);
+            single("V04", "E-mail address with a plus sign (a+b@yopmail.com)", "", x -> m("personal email id", "plus.test+" + x.deliveryPartnerId.replace("-", "").toLowerCase(Locale.ROOT) + "@yopmail.com"), true);
+            single("V05", "E-mail address in capital letters", "", x -> m("personal email id", ("CAPS" + x.deliveryPartnerId.replace("-", "") + "@YOPMAIL.COM")), true);
+            single("V06", "Name of two letters", "", x -> m("name", "Jo", "name as per company", "Jo", "dp name as per company", "Jo"), true);
+
+            // ---- structure of the workbook: every required column missing (one scenario each), a duplicate heading, no heading row
+            for (String col : concat(List.of("client name", "project name"), REQUIRED)) {
+                columnScenario("HM-" + col.replace(' ', '-'), "A required column is missing: the heading of \"" + labelOf(col) + "\" removed", col, w -> AorWorkbooks.changeHeader(w, col, null), true);
+            }
+            columnScenario("H1", "A column heading twice (\"Name\" appears two times)", "name", w -> AorWorkbooks.addColumn(w, "Name", "again"), true);
+            columnScenario("H2", "No heading row: the first employee stands in the first row", "", w -> AorWorkbooks.deleteHeaderRow(w), true);
+
             // =============================================== DATA INTEGRITY: an existing employee must not be changed by a row that repeats its company employee id
             step("I00", "The first base employee: what the application holds now compared with what was uploaded", "Every value is the one that was uploaded", this::baseIntegrity);
             step("I01", "Existing employee: a new row repeats its company employee id (profile before and after)", "The row is refused and the existing employee stays exactly as it is", this::updateExisting);
@@ -527,6 +615,30 @@ public class AorEdgeCases extends BaseTest {
         return out;
     }
 
+    // ======================================================================== value sets of the complete negative / edge set (user, 2026-11-13: "complete negative and edge testing
+    // including strings and integers"). Every value here must be REFUSED when it stands in the column it is tried in (a valid edge value is a "single(..., true)" scenario).
+    private static final String ARABIC_DIGITS = "\u0669\u0668\u0667\u0666\u0665\u0664\u0663\u0662\u0661\u0660";
+    private static final String DEVANAGARI_DIGITS = "\u096F\u096E\u096D\u096C\u096B\u096A\u0969\u0968\u0967\u0966";
+    private static final String FULLWIDTH_DIGITS = "\uFF19\uFF18\uFF17\uFF16\uFF15\uFF14\uFF13\uFF12\uFF11\uFF10";
+    /** Strings and numbers that are no whole number of the right length: for the columns that hold digits (contact number, Aadhaar, manager contact). */
+    private static final String[] INT_ODD = {"0", "-1", "1.5", "1E10", "12345678901234567890", ARABIC_DIGITS, DEVANAGARI_DIGITS, FULLWIDTH_DIGITS, "+0", "0x1F", "1,000", "TRUE", "=1+1",
+            "@SUM(1)", "NaN", "Infinity", "null", "undefined", "None"};
+    private static final String[] ACCOUNT_ODD = {"0", "-1", "1.5", "1E10", "1234567", "123456789012345678901234567890123456", ARABIC_DIGITS, "1234-5678-9012", "1.23E+11", "-12345678901",
+            "0000000000000", "12345abc6789", "=1+1", "TRUE", "NaN", "null"};
+    /** Text columns (name, father name, bank name): numbers, booleans, formulas, dates, markup, template and path injections. */
+    private static final String[] TEXT_ODD = {"12345", "123.45", "0", "-1", "1E5", "TRUE", "=1+1", "@SUM(A1)", "+1+1", "-1+1", "2020-01-01", "<b>x</b>", "<img src=x onerror=alert(1)>",
+            "javascript:alert(1)", "{{7*7}}", "${7*7}", "%s%s%s", "%00", "../../etc/passwd", "\\\\server\\share"};
+    private static final String[] DATE_ODD = {"abc", "32/13/2020", "2020-02-30", "29-02-2021", "30-02-2000", "31-04-2000", "1899-12-31", "9999-12-31", "0000-00-00", "-1", "TRUE", "12:30",
+            "2000-01-01 25:61", "two thousand", "00/00/00"};
+    private static final String[] EMAIL_ODD = {"a@b@c.com", "a b@yopmail.com", "a@yopmail..com", ".a@yopmail.com", "a.@yopmail.com", "a@-yopmail.com", "a@yopmail.c", "a,b@yopmail.com",
+            "a@yopmail.com;b@yopmail.com", "<a@yopmail.com>", "mailto:a@yopmail.com", "a@[127.0.0.1]", "x".repeat(65) + "@yopmail.com", "a@" + "y".repeat(250) + ".com", "a@yopmail.com\nb"};
+    private static final String[] IFSC_ODD = {"sbin0001234", "SBIN1001234", "SBIN000123", "SBIN00012345", "SBIN0001 234", "SBIN000123$", "1234SBIN000", "0000SBIN123", "S".repeat(30), "SBIN0",
+            "\uFF33\uFF22\uFF29\uFF2E0001234"};
+    private static final String[] PAN_ODD = {"ABCZE1234F", "ABCXE1234F", "ABCDE0000F", "ABCDE12345", "1BCDE1234F", "ABCD11234F", "\uFF21\uFF22\uFF23\uFF24\uFF25" + "1234F", "ABC\u00C9E1234F"};
+    private static final String[] AADHAAR_ODD = {"111111111111", "123456789012", "999999999999", "200000000000", "222222222222", "987654321098"};
+    private static final String[] FHRID_ODD = {"dpa-000000", "DPA", "  ", "DPA-" + "0".repeat(40), "!@#$%^", "<script>alert(1)</script>", "=1+1", "0", "-1", "DPA 12 34"};
+    private static final String[] PAYOUT_ODD = {"1,000", "\u20B9500", "0.001", "99999999999999999999", "\u0665\u0660\u0660", "=1+1", "TRUE", "0x1F", "NaN", "Infinity", "500 INR"};
+
     /** The columns that the QA owner's list fills (the others keep the template's values). */
     private static final List<String> REQUIRED = List.of("state", "delivery partner id", "company employee id", "name", "name as per company", "contact number", "father name",
             "date of onboarding", "hub location", "hub name", "date of joining", "date of birth", "personal email id", "aadhar number", "pan number", "account number", "ifsc code");
@@ -672,21 +784,45 @@ public class AorEdgeCases extends BaseTest {
 
     /** I01: a row that repeats the company employee id of an existing employee (an accepted test employee): profile before, upload, profile after, every changed field listed. */
     private String updateExisting() {
-        AorEmployee target = !spare.isEmpty() ? spare.get(0) : (run != null && run.employees.size() > 2 ? run.employees.get(run.employees.size() - 1) : null); // a spare employee, else the last base employee
+        // candidates, best first: the spare employees of the last happy flow, a test employee that the application accepted wrongly earlier, the last base employee. The first one that the
+        // application still holds is used (employees of earlier runs can be gone from the application); when none is there, a fresh employee is onboarded for this scenario.
+        List<AorEmployee> candidates = new ArrayList<>(spare);
         for (AorEmployee e : onboarded) {
-            if (target != null) {
+            if (run != null && !run.employees.contains(e)) {
+                candidates.add(e);
+            }
+        }
+        if (run != null && run.employees.size() > 2) {
+            candidates.add(run.employees.get(run.employees.size() - 1));
+        }
+        AorEmployee target = null;
+        Map<String, String> before = null;
+        for (AorEmployee c : candidates) {
+            before = captureProfile(c.deliveryPartnerId);
+            if (before != null) {
+                target = c;
                 break;
             }
-            if (run != null && !run.employees.contains(e)) {
-                target = e; // a test employee that the application accepted wrongly: it is not needed as a base employee
-            }
+            Log.warn("The candidate " + c.name + " (" + c.deliveryPartnerId + ") is not in the list of AOR agents any more: the next one is tried.");
         }
         if (target == null) {
-            throw new SkipException("Not run: there is no spare test employee whose record may be touched.");
-        }
-        Map<String, String> before = captureProfile(target.deliveryPartnerId);
-        if (before == null) {
-            throw new SkipException("Not run: the spare employee " + target.name + " is not in the list any more.");
+            AorRun fresh = AorDataGenerator.newRun(1);
+            AorDataGenerator.assignPayouts(fresh);
+            AorWorkbooks.writeEmployeeWorkbook(fresh, bulkFile());
+            AorDialog.Answer made = uploadBulk(bulkFile());
+            int created = AorDialog.numberBefore(made.everything(), "created", "added", "inserted", "onboarded");
+            if (created != 1) {
+                throw new AssertionError("No employee for the update check could be onboarded. " + made.describe());
+            }
+            budget.created(1);
+            target = fresh.employees.get(0);
+            AorEdgeRegistry.record(fresh.runId, "base", target);
+            onboarded.add(target);
+            saveRun();
+            before = captureProfile(target.deliveryPartnerId);
+            if (before == null) {
+                throw new AssertionError("The employee " + target.name + " that was onboarded for this scenario is not in the list of AOR agents.");
+            }
         }
         AorRun one = AorDataGenerator.newRun(1);
         AorEmployee n = one.employees.get(0);
@@ -815,9 +951,17 @@ public class AorEdgeCases extends BaseTest {
     private String keepIntactBase() {
         List<AorEmployee> intact = new ArrayList<>();
         List<String> left = new ArrayList<>();
+        // only as many employees as the Payee Sheet cases need (base()) are checked, and only in the LIST (name and state of the row): the saved edge workbook can hold dozens of employees of
+        // earlier runs, and opening the whole profile (six pages) of each of them repeated the same check again and again (user, 2026-11-13)
         for (AorEmployee e : new ArrayList<>(run.employees)) {
-            Map<String, String> p = captureProfile(e.deliveryPartnerId);
-            if (p != null && e.name.equals(p.get("Header > NAME"))) {
+            if (intact.size() >= base()) {
+                break;
+            }
+            agents.dialog().dismiss();
+            agents.open();
+            List<Map<String, String>> found = agents.search(e.deliveryPartnerId);
+            String row = found.isEmpty() ? "" : String.join(" | ", found.get(0).values());
+            if (!found.isEmpty() && row.contains(e.name) && row.contains(e.state)) {
                 intact.add(e);
             } else {
                 left.add(e.name + " (" + e.deliveryPartnerId + ")");
@@ -908,6 +1052,38 @@ public class AorEdgeCases extends BaseTest {
             out.append(label).append(": ").append(sa.describe()).append(" ");
         }
         return out.toString();
+    }
+
+    private static List<String> concat(List<String> first, List<String> second) {
+        List<String> out = new ArrayList<>(first);
+        out.addAll(second);
+        return out;
+    }
+
+    /** Two rows of one file that repeat one column of the first row in the second: at most the first employee may be created, the second row must be refused with a message. */
+    private void sameFileColumn(String id, String title, String column, Function<AorEmployee, String> value) {
+        step(id, title, "At most the first employee is created; the second row is refused with a message", () -> {
+            needLimit(id, 2);
+            AorRun two = AorDataGenerator.newRun(2);
+            AorEmployee a = two.employees.get(0);
+            AorEmployee b = two.employees.get(1);
+            Map<String, String> again = new LinkedHashMap<>();
+            again.put(column, value.apply(a));
+            AorWorkbooks.writeEmployeeWorkbookWith(two, bulkFile(), List.of(new LinkedHashMap<>(), again));
+            AorDialog.Answer answer = uploadBulk(bulkFile());
+            int created = Math.max(0, AorDialog.numberBefore(answer.everything(), "created", "added", "inserted", "onboarded"));
+            Map<Integer, List<String>> issues = parseIssues(answer.everything());
+            if (created >= 1 && !issues.containsKey(2)) {
+                book(a, new LinkedHashMap<>(), "base");
+            }
+            if (created >= 2) {
+                book(b, again);
+                rep.defect("The application accepted both rows although the second repeats a value of the first (" + title + ")", "Only the first employee is created", answer.describe());
+            } else if (!issues.containsKey(3) && !AorDialog.tellsOfProblem(answer.everything())) {
+                rep.defect("The second row was left out without a message that says why (" + title + ")", "A message that names the problem", answer.describe());
+            }
+            return answer.describe();
+        });
     }
 
     private String sameFile() {
@@ -1029,6 +1205,40 @@ public class AorEdgeCases extends BaseTest {
             payeeRow("Q04", "State that is not the state of the employee", m("state", "Atlantis"));
             payeeRow("Q05", "Wm name left empty", m("wm name", null));
             payeeRow("Q06", "Wm name that is not the name of the employee", m("wm name", "Somebody Else"));
+
+            // =============================================== COMPLETE NEGATIVE / EDGE SET (user, 2026-11-13): strings and integers in every column of the Payee Sheet, the pay period
+            int qn = 20;
+            for (String v : FHRID_ODD) {
+                payeeRow("Q" + qn++, "FHRID: " + describeValue(v), m("fhrid", v));
+            }
+            for (String v : PAYOUT_ODD) {
+                payeeRow("Q" + qn++, "Final payout: " + describeValue(v), m("final payout", v));
+            }
+            for (String v : new String[] {"12345", "<script>alert(1)</script>", "N".repeat(300), "   ", "=1+1", "\u200B"}) {
+                payeeRow("Q" + qn++, "Wm name: " + describeValue(v), m("wm name", v));
+            }
+            for (String v : new String[] {"12345", "kerala", "KERALA", "  Kerala  "}) {
+                payeeRow("Q" + qn++, "State: " + describeValue(v), m("state", v));
+            }
+            for (String v : new String[] {"12345", "<script>alert(1)</script>", "H".repeat(300), "   "}) {
+                payeeRow("Q" + qn++, "Delivery hub: " + describeValue(v), m("delivery_hub", v));
+            }
+            step("P06", "Pay period without a start date", "The application should not accept it", () -> {
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", null, LocalDate.now()));
+            });
+            step("P07", "Pay period without an end date", "The application should not accept it", () -> {
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.now(), null));
+            });
+            step("P08", "Pay period in the year 1900", "The application should not accept a pay period that old", () -> {
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.of(1900, 1, 1), LocalDate.of(1900, 1, 2)));
+            });
+            step("P09", "Pay period of three years", "The application should not accept a pay period that long (or should say what it does)", () -> {
+                AorWorkbooks.writePayeeWorkbook(view(run, 1), payFile());
+                return judgePayee(uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", LocalDate.now().minusYears(3), LocalDate.now()));
+            });
 
             step("Q00", "Valid Payee Sheet for the base employees", "The application accepts every row and creates the payroll entries", () -> {
                 if (sessions >= sessionLimit) {
@@ -1242,7 +1452,23 @@ public class AorEdgeCases extends BaseTest {
                 case "K01": case "K02": case "K03": return List.of("Column Validation");
                 case "V01": case "V02": return List.of("Valid Edge Values");
                 case "R00": return List.of("Retention");
-                default: return List.of("Other");
+                default:
+                    if (id.startsWith("HM-") || id.startsWith("H")) {
+                        return List.of("Column Validation");
+                    }
+                    if (id.startsWith("C")) {
+                        return List.of("Client and Project");
+                    }
+                    if (id.startsWith("T")) {
+                        return List.of("Data Types", "Wrong Formats");
+                    }
+                    if (id.startsWith("D")) {
+                        return List.of("Duplicates");
+                    }
+                    if (id.startsWith("B")) {
+                        return List.of("Date Validation", "Boundary Values");
+                    }
+                    return List.of("Other");
             }
         }
         switch (id) {
@@ -1267,6 +1493,7 @@ public class AorEdgeCases extends BaseTest {
         ScenarioBoard.defect("AOR-D07", "Medium", "The Payee Sheet accepts a pay period in the future", "");
         ScenarioBoard.defect("AOR-D08", "Medium", "The Payee Sheet accepts a decimal payout (1234.567)", "");
         ScenarioBoard.defect("AOR-D09", "Low", "Messages show developer text instead of plain words", "For example \"Input should be a valid string\" and the PAN / Aadhaar verification error with an internal class name.");
+        ScenarioBoard.defect("AOR-D11", "High", "The client and the project of a row are not checked", "A row without a client, with an unknown client or with a project that does not belong to the client is accepted (to be confirmed by the run).");
         ScenarioBoard.defect("AOR-D10", "Low", "A missing or renamed column is reported as an empty value", "\"Name: Input should be a valid string\" instead of saying that the column is missing.");
     }
 
@@ -1283,7 +1510,29 @@ public class AorEdgeCases extends BaseTest {
             case "P05": return List.of("AOR-D07");
             case "Q11": return List.of("AOR-D08");
             case "Q03": case "Q04": case "Q05": case "Q06": case "Q13": case "Q14": return List.of("AOR-D03");
-            default: return List.of();
+            default:
+                if (id.startsWith("C")) {
+                    return List.of("AOR-D11");
+                }
+                if (id.startsWith("T") || id.startsWith("V")) {
+                    return List.of("AOR-D05");
+                }
+                if (id.startsWith("D")) {
+                    return List.of("AOR-D02");
+                }
+                if (id.startsWith("B")) {
+                    return List.of("AOR-D04");
+                }
+                if (id.startsWith("H")) {
+                    return List.of("AOR-D10");
+                }
+                if (id.startsWith("Q2") || id.startsWith("Q3") || id.startsWith("Q4")) {
+                    return List.of("AOR-D03");
+                }
+                if (id.startsWith("P0") && !id.equals("P01") && !id.equals("P02") && !id.equals("P03") && !id.equals("P04")) {
+                    return List.of("AOR-D07");
+                }
+                return List.of();
         }
     }
 
@@ -1591,6 +1840,15 @@ public class AorEdgeCases extends BaseTest {
     }
 
     /** One payout row of the first base employee with one value changed. */
+    /** A short plain description of a value for a scenario title. */
+    private static String describeValue(String v) {
+        if (v.isBlank()) {
+            return "only spaces";
+        }
+        String t = v.length() > 24 ? v.substring(0, 12) + "... (" + v.length() + " characters)" : v;
+        return "\"" + t.replace("\n", "\\n").replace("\t", "\\t").replace("\u200B", "zero-width space") + "\"";
+    }
+
     private void payeeRow(String id, String title, Map<String, String> change) {
         step(id, title, "The application should refuse the row, create no payroll entry and say what is wrong", () -> {
             if (sessions >= sessionLimit) {
@@ -1636,7 +1894,7 @@ public class AorEdgeCases extends BaseTest {
         }
         AorDialog.Answer a;
         try {
-            a = d.clickAndWait("Upload", file == null || client == null || project == null ? 25 : 300); // an incomplete window is answered at once
+            a = d.clickAndWait("Upload", file == null || client == null || project == null || start == null || end == null ? 25 : 300); // an incomplete window (a missing choice or date) is answered at once
         } catch (RuntimeException e) {
             a = new AorDialog.Answer();
             a.windowText = "The Upload button cannot be clicked with these choices (the application refuses it by keeping the button off).";

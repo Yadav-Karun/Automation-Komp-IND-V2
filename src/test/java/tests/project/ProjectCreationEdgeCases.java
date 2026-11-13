@@ -184,7 +184,7 @@ public class ProjectCreationEdgeCases extends BaseTest {
             holder = new ClientData(); // the report's entry header needs a client record; the real header line is headline()
             holder.legalName = "(chosen in S00)";
             holder.clientType = type;
-            holder.email = ConfigManager.eorEmail();
+            holder.email = ConfigManager.adminEmail();
             tcSummary = ExtentManager.get().createTest("SUMMARY | " + tc + " | " + type + " project edge cases").assignCategory(ExecutionInfo.module(), tc, "Summary");
             try {
                 setup();
@@ -216,7 +216,7 @@ public class ProjectCreationEdgeCases extends BaseTest {
         }
 
         String headline() {
-            return "Project type: " + type + " | signed in as " + SecretMasker.maskEmail(ConfigManager.eorEmail()) + " | client used for the scenarios: "
+            return "Project type: " + type + " | signed in as " + SecretMasker.maskEmail(ConfigManager.adminEmail()) + " | client used for the scenarios: "
                     + (client == null ? "(chosen in S00)" : client) + " | scenarios run: " + ran + " | " + budget + " (limit " + budget.limit() + ")"
                     + " | seed " + seed;
         }
@@ -303,7 +303,7 @@ public class ProjectCreationEdgeCases extends BaseTest {
 
         void signInQuiet() {
             login.freshLogin(ConfigManager.baseUrl());
-            login.login(ConfigManager.eorEmail(), ConfigManager.eorPassword());
+            login.login(ConfigManager.adminEmail(), ConfigManager.adminPassword());
             Assert.assertTrue(projects.menuVisible(), "The dashboard is not displayed after the login.");
             signedIn = true;
         }

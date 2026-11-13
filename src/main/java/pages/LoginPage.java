@@ -33,8 +33,16 @@ public class LoginPage extends BasePage {
     private final By password = By.id("password");
     private final By signIn = By.xpath("//button[@type='submit' and normalize-space()='Sign in']");
 
+    /** When set, a rate-limit answer is not waited out: {@link utils.RateLimitedLogin} is thrown so that the caller can restart the browser. */
+    private boolean restartOnRateLimit;
+
     public LoginPage(WebDriver driver) {
         super(driver);
+    }
+
+    public LoginPage restartOnRateLimit(boolean on) {
+        this.restartOnRateLimit = on;
+        return this;
     }
 
     public void open(String url) {
@@ -153,6 +161,9 @@ public class LoginPage extends BasePage {
             } catch (TimeoutException e) {
                 List<String> shown = new ArrayList<>(ToastWatcher.all(driver));
                 shown.addAll(FormFeedback.inlineMessages(driver));
+                if (isRateLimited(shown) && restartOnRateLimit) {
+                    throw new utils.RateLimitedLogin("The application answered: " + shown);
+                }
                 if (isRateLimited(shown) && System.currentTimeMillis() < end) {
                     waitOutRateLimit();
                     continue;

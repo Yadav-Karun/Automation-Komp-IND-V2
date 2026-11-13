@@ -416,6 +416,26 @@ public class AorOnboardingFinanceFlow {
     }
 
     /**
+     * The SECOND upload (only there to have a second payroll session for the delete check; everything about the entries was checked after the first upload, user 2026-11-13):
+     * finds the id of the session that the upload created - the session of the run date that was not there before - with one search, and checks nothing else.
+     */
+    public void identifySecondSession(ValueChecks c) {
+        payroll.open();
+        payroll.filterDates(runDate(), runDate());
+        payroll.setPageSize(10);
+        AorEmployee e = run.employees.get(0);
+        payroll.search(e.name);
+        String id = payroll.rows().stream().filter(r -> TableReader.column(r, "AGENT NAME").equals(e.name) && !earlierSessions.contains(TableReader.column(r, "SESSION ID")))
+                .map(r -> TableReader.column(r, "SESSION ID")).findFirst().orElse(null);
+        c.check("Payroll session", "The second upload created a new payroll session", id != null, "a session that was not there before (not one of " + earlierSessions + ")", id == null ? "no new session found" : id);
+        if (id != null) {
+            run.sessionId = id;
+            saveRunData();
+        }
+        payroll.search("");
+    }
+
+    /**
      * FIN-12 - the payroll list for the run date shows an entry for every employee with the right hub, state, employee id, pay period and payout, all in ONE new payroll
      * session; its id is kept for the downloads and the invoice.
      */

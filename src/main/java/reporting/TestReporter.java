@@ -48,7 +48,7 @@ public final class TestReporter {
     private static final ThreadLocal<TestReporter> CURRENT = new ThreadLocal<>();
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private final WebDriver driver;
+    private WebDriver driver;
     private final ExtentTest test;
     private final ClientData data;
     private final LocalDateTime started = LocalDateTime.now();
@@ -92,6 +92,11 @@ public final class TestReporter {
     /** "ID - title" of this case (for the list in the progress bar). */
     public String name() {
         return testName;
+    }
+
+    /** After the browser was replaced (restart): pictures and server requests come from the new browser. */
+    public void setDriver(WebDriver newDriver) {
+        this.driver = newDriver;
     }
 
     private TestReporter(WebDriver driver, ExtentTest test, ClientData data) {

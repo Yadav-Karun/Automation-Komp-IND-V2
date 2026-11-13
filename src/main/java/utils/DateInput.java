@@ -16,7 +16,7 @@ public final class DateInput {
     }
 
     public static void type(WebDriver driver, WebElement input, LocalDate date) {
-        ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'})", input);
+        utils.SmoothScroll.to(driver, input);
         input.click();
         // no Ctrl+A here: in a date box it selects the whole PAGE (seen as a page full of highlighted text). The digits simply replace the parts of the date.
         input.sendKeys(keys(driver, date));

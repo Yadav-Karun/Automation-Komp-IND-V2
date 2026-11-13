@@ -269,6 +269,27 @@ public final class AorWorkbooks {
         }
     }
 
+    /** The sheet of the employees gets another name (the sheet carries the name of the client). */
+    public static void renameSheet(Path file, String newName) {
+        try (Workbook wb = open(file)) {
+            wb.setSheetName(0, newName);
+            save(wb, file);
+        } catch (IOException e) {
+            throw new IllegalStateException("The workbook " + file + " could not be changed: " + e.getMessage(), e);
+        }
+    }
+
+    /** The heading row is deleted: the first employee stands where the headings should be. */
+    public static void deleteHeaderRow(Path file) {
+        try (Workbook wb = open(file)) {
+            Sheet sheet = wb.getSheetAt(0);
+            sheet.shiftRows(1, sheet.getLastRowNum(), -1);
+            save(wb, file);
+        } catch (IOException e) {
+            throw new IllegalStateException("The workbook " + file + " could not be changed: " + e.getMessage(), e);
+        }
+    }
+
     /** A column that the template does not have, with one value in the first row. */
     public static void addColumn(Path file, String header, String value) {
         try (Workbook wb = open(file)) {

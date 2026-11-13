@@ -350,7 +350,7 @@ public class ClientOnboardingFlow {
 
     public String eorLoginAndFindMsa() {
         login.freshLogin(ConfigManager.eorBaseUrl());
-        login.login(ConfigManager.eorEmail(), ConfigManager.eorPassword());
+        login.login(ConfigManager.adminEmail(), ConfigManager.adminPassword());
         Assert.assertTrue(adminHome.isLoaded(), "The dashboard of the approver (EOR user) did not open.");
         eorMsa.open();
         eorMsa.searchClient(data.legalName);

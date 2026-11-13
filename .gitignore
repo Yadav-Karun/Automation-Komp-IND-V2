@@ -17,3 +17,4 @@ conversation-*.txt
 testdata/aor-templates/
 testdata/aor-used-ids.txt
 testdata/aor-edge-employees.txt
+.yopmail-profile/

@@ -97,11 +97,21 @@ public abstract class BaseTest {
             case "client" -> ExecutionInfo.MODULE_CLIENT;
             case "project" -> "Project-Management";
             case "aor" -> "Employee-AOR"; // tests.employee.aor
+            case "eor" -> "Employee-EOR"; // tests.employee.eor
             default -> last.isEmpty() ? ExecutionInfo.MODULE_CLIENT : Character.toUpperCase(last.charAt(0)) + last.substring(1);
         };
     }
 
     /** Hook: a browser was started (or restarted). Create page objects here; sessions of an earlier browser are gone. */
+    /** Closes the browser and opens a new one (the sessions are lost; {@link #browserReady()} runs again). Used when the application says "Too many sign-in attempts". */
+    protected void restartBrowser() {
+        Log.warn("Closing the browser and opening a new one.");
+        DriverFactory.quit(driver);
+        driver = DriverFactory.create();
+        browserReady();
+        RunBanner.update(driver, plannedCases, finishedCases, runStartMs, board);
+    }
+
     protected void browserReady() {
         // nothing by default
     }

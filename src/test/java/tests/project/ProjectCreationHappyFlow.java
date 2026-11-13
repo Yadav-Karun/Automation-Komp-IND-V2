@@ -59,7 +59,7 @@ public class ProjectCreationHappyFlow extends BaseTest {
         ClientData holder = new ClientData(); // the report's case header needs a client record; the real header line is ProjectCreationFlow.headline
         holder.legalName = "(selected in step 5)";
         holder.clientType = type;
-        holder.email = ConfigManager.eorEmail();
+        holder.email = ConfigManager.adminEmail();
 
         TestReporter rep = TestReporter.start(id, "Project happy flow " + type, title,
                 "Positive regression test: the EOR user creates an " + type + " project for an existing client and finds it, Active, in the " + type + " listing",
