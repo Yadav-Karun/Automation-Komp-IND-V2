@@ -15,7 +15,7 @@ import reporting.TestReporter;
 import utils.ConfigManager;
 
 /**
- * EMPLOYEE - EOR: ONBOARDING, HAPPY FLOW (positive path only; negative cases belong in a later suite). Five cases in this order, each one needs the one before:
+ * EMPLOYEE - EOR: ONBOARDING, HAPPY FLOW (positive path only; negative cases belong in a later suite). Cases in this order, each one needs the one before:
  *
  *   TC-EOR-01  EOR employee bulk upload: sign in as the administrator, Employees > EOR > Bulk Upload, a copy of the owner's workbook is filled with new employees and uploaded
  *   TC-EOR-02  Every employee accepts the Letter of Intent from the e-mail, signs in to the candidate portal and fills in the whole profile (an experienced employee also fills in the
@@ -23,9 +23,13 @@ import utils.ConfigManager;
  *   TC-EOR-03  The administrator verifies every employee and sends the offer letter
  *   TC-EOR-04  Every employee accepts the offer in the candidate portal
  *   TC-EOR-05  The administrator marks every employee as joined; the employees are Active in Employees > EOR
+ *   TC-EOR-06  The administrator opens the profile of every finished employee and compares every tab with what was entered (read-only: nothing is edited)
+ *   TC-EOR-07  EDIT (user, 2026-11-19): the administrator opens the same employee (Employees > EOR > search > View), "Unmask all", changes every value of every tab and submits each tab, logs out
+ *   TC-EOR-08  The administrator signs in again, unmasks and checks every tab against the changes; MSA & Contract > Contract > search > the contract is compared; logs out
+ *   TC-EOR-09  The employee signs in with the login data of the mail "Welcome Aboard - Your Employee Login Details" and every detail of the own account is compared with the changed profile
  *
  * The workbook is the one of the QA owner ({@code employeeBulkUploadExcelPath} in config/documents.properties): only a COPY is filled. The administrator login is the EOR / admin login of
- * config/secrets.local.properties. The employees get yopmail addresses and cannot be deleted by automation: a run creates {@code -Deor.employees} (default 2: the first a fresher, the second experienced; at most 5) of them; their
+ * config/secrets.local.properties. The employees get yopmail addresses and cannot be deleted by automation: a run creates {@code -Deor.employees} (default 1, a fresher or an experienced employee chosen at random; at most 5) of them; their
  * e-mail addresses are kept in testdata/eor-used-emails.txt. An employee whose step failed is left out of the later steps; the other employees go on.
  *
  * Run:   mvn clean test -Dsuite=testng-eor-onboarding.xml
@@ -39,7 +43,8 @@ public class EOROnboarding extends BaseTest {
     private static final String G_JOIN = "Joining";
     private static final String G_PROFILE_CHECK = "Profile check";
     private static final String G_PROFILE_EDIT = "Profile edit";
-    private static final String G_CONTRACT = "List and contract";
+    private static final String G_CONTRACT = "Check after the edit";
+    private static final String G_EMPLOYEE = "Employee account";
 
     private EorOnboardingFlow flow;
     private EorRun run;
@@ -100,10 +105,10 @@ public class EOROnboarding extends BaseTest {
             uploaded = true;
             skip("TC-EOR-01", G_UPLOAD, title, "-Deor.existing is set: the employee " + e.email + " of an earlier run is used, nothing is uploaded");
         }
-        int n = Math.max(1, Math.min(5, ConfigManager.getInt("eor.employees", 2)));
+        int n = Math.max(1, Math.min(5, ConfigManager.getInt("eor.employees", 1)));
         TestReporter rep = TestReporter.start("TC-EOR-01", G_UPLOAD, title,
                 "Positive test: the administrator fills the supplied onboarding workbook with new EOR employees, uploads it and finds the employees in the list of candidates",
-                "A copy of the supplied workbook with " + n + " new employees (random names, yopmail addresses; the first a fresher, the second experienced)",
+                "A copy of the supplied workbook with " + n + " new employees (random names, yopmail addresses; fresher or experienced chosen at random)",
                 "The application accepts every employee; each employee is found in the list of candidates", driver, holder(), flow::headline);
         flow.setReporter(rep);
         try {
@@ -273,16 +278,18 @@ public class EOROnboarding extends BaseTest {
         finish(rep);
     }
 
-    // TC-EOR-07 - per employee: every tab of the profile has blocks with an Edit button: every value that can be changed is changed (Personal & Contact EOR-15, Professional EOR-16,
-    // Statutory Details EOR-17, Documents EOR-18) and the profile shows the new values.
+    private static final String[] PROFILE_TABS = {"Personal & Contact", "Professional", "Statutory Details", "Documents", "Employment Documents"};
+
+    // TC-EOR-07 - per employee, after the onboarding: Employees > EOR > search > View, "Unmask all", then every tab in turn: every block gets its Edit button, every value that can be changed is
+    // changed and submitted (Personal & Contact, Professional, Statutory Details, Documents; Employment Documents only lists documents and has no Edit button). Then the administrator logs out.
     @Test(priority = 7)
     public void tc07_editProfiles() throws Exception {
-        String title = "EOR profile: every block of every tab can be edited and the profile shows the new values";
+        String title = "EOR profile edit: every value of every tab can be changed and the profile shows the new values";
         if (!ready("TC-EOR-07", G_PROFILE_EDIT, title, "TC-EOR-07")) {
             return;
         }
         TestReporter rep = TestReporter.start("TC-EOR-07", G_PROFILE_EDIT, title,
-                "Positive test: for each employee that joined the administrator opens every block of every tab with its Edit button, changes every value that can be changed, submits, and checks the new values",
+                "Positive test: for each employee that joined the administrator opens Employees > EOR > View, unmasks all values, changes every value of every tab, submits each tab and logs out",
                 "The employees that joined; changed values (a digit counted up, a suffix added, another entry chosen from a list)", "Every changed value is shown with its new content", driver, holder(), flow::headline);
         flow.setReporter(rep);
         rep.phase("tc_eor_07_sign_in", "Sign in as the administrator", "The login succeeds", flow::signInAdmin);
@@ -295,12 +302,13 @@ public class EOROnboarding extends BaseTest {
             }
             String who = "Employee " + i + " " + e.fullName();
             try {
-                rep.phaseChecks("tc_eor_07_edit_" + i, who + ": change every value of Personal & Contact, Professional, Statutory Details and Documents (EOR-15 to EOR-18)",
-                        "Every block accepts the change and the profile shows the new values", c -> flow.withProfile(e, () -> {
-                            for (String tab : new String[] {"Personal & Contact", "Professional", "Statutory Details", "Documents"}) {
-                                flow.editTab(e, tab, c);
-                            }
-                        }));
+                rep.phase("tc_eor_07_open_" + i, who + ": Employees > EOR, search the employee, View, \"Unmask all\"", "The profile opens and every value is shown", () -> flow.openProfileForEdit(e));
+                int t = 0;
+                for (String tab : PROFILE_TABS) {
+                    t++;
+                    rep.phaseChecks("tc_eor_07_" + i + "_tab" + t, who + ": change every value of \"" + tab + "\" and submit",
+                            "Every block accepts the change and the tab shows the new values", c -> flow.editTab(e, tab, c));
+                }
             } catch (SkipException lost) {
                 throw lost;
             } catch (Throwable t) {
@@ -308,22 +316,23 @@ public class EOROnboarding extends BaseTest {
             }
         }
         flow.save();
+        rep.phase("tc_eor_07_sign_out", "Log out of the administrator console (profile menu, Log out)", "The login page is shown", flow::signOutAdmin);
         finish(rep);
     }
 
-    // TC-EOR-08 - per employee, after the changes of TC-EOR-07: Employees > EOR (search) shows the changed values (EOR-19); MSA & Contract > Contract: the list row, the contract page,
-    // the Salary Breakup after "Unmask all", and Edit Contract (step 1, then step 2 after "Save & Continue") show the same values (EOR-20).
+    // TC-EOR-08 - the administrator signs in again; per employee: Employees > EOR > search > View, "Unmask all", every tab is compared with the values of TC-EOR-07; then MSA & Contract > Contract >
+    // search > click the row: the list row and the contract page are compared (name, designation, joining date as changed). Then the administrator logs out.
     @Test(priority = 8)
-    public void tc08_listAndContract() throws Exception {
-        String title = "EOR list and contract: the changed employee is shown correctly in Employees and in MSA & Contract";
+    public void tc08_checkAfterEdit() throws Exception {
+        String title = "EOR after the edit: signing in again shows every changed value in the profile and in the contract";
         if (!ready("TC-EOR-08", G_CONTRACT, title, "TC-EOR-08")) {
             return;
         }
         TestReporter rep = TestReporter.start("TC-EOR-08", G_CONTRACT, title,
-                "Positive test: for each employee that joined the administrator searches the employee in Employees > EOR and in MSA & Contract > Contract, opens the contract, unmasks the salary values and walks through Edit Contract",
-                "The employees that joined; the values of the workbook row and the changes of TC-EOR-07", "Every value equals what was entered or changed", driver, holder(), flow::headline);
+                "Positive test: after signing in again the administrator checks every tab of the profile and then the contract of each employee against the changes of TC-EOR-07",
+                "The employees that joined; the values changed in TC-EOR-07", "Every value equals what was typed in the edit case; the contract shows the changed name, designation and joining date", driver, holder(), flow::headline);
         flow.setReporter(rep);
-        rep.phase("tc_eor_08_sign_in", "Sign in as the administrator", "The login succeeds", flow::signInAdmin);
+        rep.phase("tc_eor_08_sign_in", "Sign in as the administrator again", "The login succeeds", flow::signInAdmin);
         int i = 0;
         for (EorEmployee e : run.employees) {
             i++;
@@ -333,13 +342,50 @@ public class EOROnboarding extends BaseTest {
             }
             String who = "Employee " + i + " " + e.fullName();
             try {
-                rep.phaseChecks("tc_eor_08_list_" + i, who + ": search in Employees > EOR (EOR-19)", "The row shows the changed name, the e-mail, the employee code and the status Active", c -> flow.verifyEmployeeList(e, c));
-                rep.phaseChecks("tc_eor_08_contract_" + i, who + ": MSA & Contract > Contract, contract page, salary breakup, Edit Contract (EOR-20)",
-                        "The list row, the contract page, the unmasked salary breakup and the two first steps of Edit Contract show the right values", c -> flow.verifyContract(e, c));
+                rep.phaseChecks("tc_eor_08_profile_" + i, who + ": Employees > EOR > View, \"Unmask all\", check every tab",
+                        "Personal & Contact, Professional, Statutory Details, Documents and Employment Documents show the changed values", c -> flow.verifyEditedProfile(e, c));
+                rep.phaseChecks("tc_eor_08_contract_" + i, who + ": MSA & Contract > Contract, search the employee, open the contract and compare",
+                        "The list row, the contract page and the unmasked salary breakup show the right values", c -> flow.verifyContract(e, c));
             } catch (SkipException lost) {
                 throw lost;
             } catch (Throwable t) {
-                failed(e, "the check of the list and the contract", t);
+                failed(e, "the check after the edit", t);
+            }
+        }
+        rep.phase("tc_eor_08_sign_out", "Log out of the administrator console (profile menu, Log out)", "The login page is shown", flow::signOutAdmin);
+        finish(rep);
+    }
+
+    // TC-EOR-09 - per employee: the mail "Welcome Aboard - Your Employee Login Details" is opened (the employee name is checked), the employee signs in with the e-mail and the temporary password of the
+    // mail, and every value of the employee's own account is compared with the changed profile. Then the employee logs out.
+    @Test(priority = 9)
+    public void tc09_employeeAccount() throws Exception {
+        String title = "EOR employee account: the employee signs in with the data of the Welcome Aboard mail and sees the changed profile";
+        if (!ready("TC-EOR-09", G_EMPLOYEE, title, "TC-EOR-09")) {
+            return;
+        }
+        TestReporter rep = TestReporter.start("TC-EOR-09", G_EMPLOYEE, title,
+                "Positive test: each employee opens the mail \"Welcome Aboard\", signs in with the login data of the mail and checks the details of the own account",
+                "The employees that joined; the mail \"Welcome Aboard - Your Employee Login Details\"; the values changed in TC-EOR-07", "The account opens and every tab shows the same values as the administrator's profile", driver, holder(), flow::headline);
+        flow.setReporter(rep);
+        int i = 0;
+        for (EorEmployee e : run.employees) {
+            i++;
+            if (!e.joined) {
+                rep.note("Employee " + i + " " + e.fullName() + " is left out: the employee did not join.");
+                continue;
+            }
+            String who = "Employee " + i + " " + e.fullName();
+            try {
+                rep.phase("tc_eor_09_mail_" + i, who + ": open the mail \"Welcome Aboard - Your Employee Login Details\"", "The mail is for this employee and gives the login data", () -> flow.readWelcomeMail(e));
+                rep.phase("tc_eor_09_sign_in_" + i, who + ": sign in with the e-mail and the password of the mail", "The employee's own account opens", () -> flow.signInEmployee(e));
+                rep.phaseChecks("tc_eor_09_account_" + i, who + ": compare every detail of the employee's account",
+                        "The welcome line, the header and every tab show the same values as the administrator's profile", c -> flow.verifyEmployeeAccount(e, c));
+                rep.phase("tc_eor_09_sign_out_" + i, who + ": log out of the employee's account", "The login page is shown", flow::signOutEmployee);
+            } catch (SkipException lost) {
+                throw lost;
+            } catch (Throwable t) {
+                failed(e, "the check of the employee's account", t);
             }
         }
         finish(rep);
@@ -362,14 +408,14 @@ public class EOROnboarding extends BaseTest {
         if (f == null) {
             return 1;
         }
-        int lowest = 6;
+        int lowest = 10;
         for (String id : f.split(",")) {
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)TC-EOR-0([0-9])").matcher(id.trim());
             if (m.find()) {
                 lowest = Math.min(lowest, Integer.parseInt(m.group(1)));
             }
         }
-        return lowest == 6 ? 1 : lowest;
+        return lowest == 10 ? 1 : lowest;
     }
 
     /** True when the case can run; otherwise its row is written as "not run" (the same SkipException ends the method). */
@@ -380,6 +426,9 @@ public class EOROnboarding extends BaseTest {
         }
         if (!wanted) {
             skip(id, group, title, "-cases does not list " + id);
+        }
+        if (flow != null && flow.stoppedOnPurpose()) {
+            skip(id, group, title, "the run was stopped on purpose after the candidate signed in (-Deor.stop.after=candidate-login); the browser is left as it is");
         }
         if (!uploaded || run == null) {
             skip(id, group, title, "the employees were not uploaded (TC-EOR-01 did not get that far), so there is nobody to continue with");

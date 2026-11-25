@@ -17,7 +17,7 @@ import utils.Xp;
  * The Yopmail inbox of one EOR employee, in its own browser tab: the "Letter of intent" mail (its button "Accept Offer" opens a page that says "Congratulations")
  * and the "Candidate Login" mail (the password of the employee and the link "Access Portal").
  */
-public class EorMailbox extends BasePage {
+public class EorMailbox extends BasePage implements EmployeeMailbox {
 
     private static final Pattern PASSWORD = Pattern.compile("(?im)password\\s*:\\s*(\\S+)");
 
@@ -25,9 +25,12 @@ public class EorMailbox extends BasePage {
     private final By inboxFrame = By.id("ifinbox");
     private final By mailFrame = By.id("ifmail");
 
-    /** The mail is read in its own browser window ({@link utils.MailBrowser}), never in the window of the test; the argument is only the browser of the test. */
+    /**
+     * The mail is read in a NEW TAB of the same browser window as the test (user, 2026-11-13: "use only 1 window to perform all actions: login, yopmail, whatever else"); the tab is
+     * closed again after the mail was read. The test never opens a second browser window.
+     */
     public EorMailbox(WebDriver testBrowser) {
-        super(utils.MailBrowser.get());
+        super(testBrowser);
         this.inbox = new YopmailPage(driver);
     }
 

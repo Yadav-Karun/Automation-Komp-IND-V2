@@ -60,6 +60,12 @@ public class EorProfilePage extends BasePage {
                 return true;
             }
         }
+        // the phone number in the header of the page (name, status, designation and phone) is hidden too: it was seen hidden while the values of the tab were already shown
+        for (String line : headerLines()) {
+            if (line.contains("XXX")) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -173,6 +179,8 @@ public class EorProfilePage extends BasePage {
         public String value;
         /** The number of the label among all labels of the page (the same before and after the change). */
         public int index;
+        /** The heading of the block the field belongs to ("Current Address"): the same label can be in several blocks ("Address", "Institution Name"). */
+        public String heading = "";
     }
 
     private static final String ROOT = "(//button[normalize-space()='Cancel'])[1]/ancestor::div[.//dl][1]";
@@ -262,6 +270,13 @@ public class EorProfilePage extends BasePage {
         if (!date.toString().equals(currentValue(label))) {
             setNative(e, date.toString());
         }
+    }
+
+    /** A time box (shift start / end): the value is set the way the page itself does, as "HH:mm". */
+    public void setTime(String label, String hhmm) {
+        org.openqa.selenium.WebElement e = visible(control(label));
+        utils.SmoothScroll.to(driver, e);
+        setNative(e, hhmm);
     }
 
     private void setNative(org.openqa.selenium.WebElement e, String value) {

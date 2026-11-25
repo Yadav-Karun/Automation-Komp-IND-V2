@@ -111,13 +111,21 @@ public class ClientOnboardingE2EHappyFlow extends BaseTest {
             skipped.finish("SKIP", skip);
             throw skip;
         }
-        data = TestDataGenerator.generate();
+        // -Dclient.resume.data=<test-data.json> -Dclient.resume.temp.password=<pw>: the client was registered earlier and its welcome mail is NOT read
+        // (Yopmail blocked): the journey goes on from phase 4 with the temporary password the person gives.
+        String resumeFile = ConfigManager.get("client.resume.data");
+        boolean resume = resumeFile != null;
+        data = resume ? TestDataGenerator.load(Paths.get(resumeFile)) : TestDataGenerator.generate();
         TestReporter rep = TestReporter.start("TC-E2E-01", G_JOURNEY, T_JOURNEY,
                 "The whole client onboarding on one new client, from registration to the status Active",
-                "Valid, unique generated client data (all yopmail addresses)",
+                resume ? "The client '" + data.legalName + "' registered earlier; the welcome mail is not read, the temporary password was given" : "Valid, unique generated client data (all yopmail addresses)",
                 "The whole journey is completed and the client ends up Active (17 steps)", driver, data);
         ClientOnboardingFlow flow = new ClientOnboardingFlow(driver, rep, data);
         try {
+            if (resume) {
+                data.temporaryPassword = ConfigManager.required("client.resume.temp.password");
+                flow.restoreMailState(data.temporaryPassword, ConfigManager.baseUrl() + "/login");
+            } else {
             // Phase 1 - Admin signs in: the login page loads, the credentials are accepted, the dashboard opens.
             rep.phase("admin_login", "Admin login and dashboard",
                     "Login page loads, credentials accepted, dashboard visible", flow::adminLogin);
@@ -128,6 +136,7 @@ public class ClientOnboardingE2EHappyFlow extends BaseTest {
             // Phase 3 - Welcome e-mail in Yopmail: addressed to the client, shows the login e-mail, has the portal link and the temporary password (shown in the report; hidden only with -Dmask.secrets=true).
             rep.phase("welcome_email", "Welcome email (Yopmail)",
                     "The welcome e-mail arrives with the portal link and the temporary password", flow::verifyWelcomeEmail);
+            }
             // Phase 4 - The client opens the portal link and signs in with the temporary password: the "Set a new password" dialog appears.
             rep.phase("client_portal_login", "Client portal login with temporary password",
                     "Portal link opens; temporary-password login succeeds and asks for a new password", flow::clientPortalLogin);

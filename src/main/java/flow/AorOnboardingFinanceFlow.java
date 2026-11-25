@@ -729,6 +729,7 @@ public class AorOnboardingFinanceFlow {
     public String generateInvoice() {
         AorDialog d = payroll.openAction("Generate Invoice", "Generate Invoice");
         d.choose("Client", run.client);
+        waitEnabled(d, "Project", 15); // the project list is loaded after the client was chosen: step 17 once could not click it (seen 2026-11-25)
         d.choose("Project", run.project);
         d.setDate("Period Start", runDate());
         d.setDate("Period End", runDate());
@@ -1251,6 +1252,11 @@ public class AorOnboardingFinanceFlow {
                     }
                 } catch (RuntimeException ignored) {
                     // the window may already be gone
+                }
+                try {
+                    payroll.reload(); // the page is loaded again before the second try: on preprod the window sometimes only works after a refresh (user, 2026-11-25)
+                } catch (RuntimeException ignored) {
+                    // the second try still goes on
                 }
             }
         }

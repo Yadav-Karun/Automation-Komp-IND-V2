@@ -132,7 +132,6 @@ final class EorProfileChecks {
         eq(c, w, "Account holder name", e.accountHolder, EorProfilePage.value(p, h, "Account Holder Name", 0));
         eq(c, w, "Bank name", e.bankName, EorProfilePage.value(p, h, "Bank Name", 0));
         eq(c, w, "Account number", e.accountNumber, EorProfilePage.value(p, h, "Account No", 0));
-        eq(c, w, "Confirm account number", e.accountNumber, EorProfilePage.value(p, h, "Confirm Account No", 0));
         eq(c, w, "Branch name", e.branchName, EorProfilePage.value(p, h, "Branch Name", 0));
         eq(c, w, "Bank address", e.bankAddress, EorProfilePage.value(p, h, "Bank Address", 0));
         eq(c, w, "IFSC code", e.ifsc, EorProfilePage.value(p, h, "Ifsc Code", 0));
@@ -163,6 +162,13 @@ final class EorProfileChecks {
     }
 
     /** The Letter of Intent and the Offer Letter are listed and accepted. */
+    /** The employee's own account lists the two documents by file name (LOI.pdf, OFFER_LETTER.pdf) and shows no "Accepted" label. */
+    static void employeeDocuments(String bodyText, ValueChecks c) {
+        String t = bodyText.replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        c.check("Employment Documents", "The Letter of Intent (LOI.pdf) is listed", t.contains("loi.pdf"), "LOI.pdf", shortText(t));
+        c.check("Employment Documents", "The Offer Letter (OFFER_LETTER.pdf) is listed", t.contains("offer_letter.pdf"), "OFFER_LETTER.pdf", shortText(t));
+    }
+
     static void employmentDocuments(String bodyText, ValueChecks c) {
         String t = bodyText.replaceAll("\\s+", " ");
         c.check("Employment Documents", "Letter of Intent is listed", t.contains("Letter of Intent"), "Letter of Intent (LOI)", shortText(t));

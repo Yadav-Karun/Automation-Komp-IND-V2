@@ -44,6 +44,14 @@ public class EorCandidatePortalPage extends BasePage {
         super(driver);
     }
 
+    /** Called with the name of the section just before "Save & Continue" is clicked (the happy flow takes the picture of the filled form there); null = nothing. */
+    private java.util.function.Consumer<String> beforeSave;
+    private String currentSection = "";
+
+    public void beforeSave(java.util.function.Consumer<String> hook) {
+        this.beforeSave = hook;
+    }
+
     // ------------------------------------------------------------------ sign in
 
     /** Ends any session and signs in on the candidate login page with the e-mail and the password from the mail. */
@@ -111,7 +119,10 @@ public class EorCandidatePortalPage extends BasePage {
         // the current address comes first ...
         chooseAt("Country", e.addressCountry, 1);
         chooseAt("State", e.addressState, 1);
-        chooseAt("City", e.addressCity, 1);
+        String city1 = chooseRandomLive("City", 1, "City of " + e.addressState);
+        if (city1 != null) {
+            e.addressCity = city1; // the city is taken at random from what the portal offers for the state: the profile checks compare with it
+        }
         field("current.pincode", e.postalCode);
         field("current.address", e.address);
         // ... then the permanent address is either the same (the box is ticked) or entered on its own
@@ -121,7 +132,10 @@ public class EorCandidatePortalPage extends BasePage {
             tickSameAsCurrent(false);
             chooseAt("Country", e.addressCountry, 2);
             chooseAt("State", e.permanentState, 2);
-            chooseAt("City", e.permanentCity, 2);
+            String city2 = chooseRandomLive("City", 2, "City of " + e.permanentState);
+            if (city2 != null) {
+                e.permanentCity = city2;
+            }
             field("permanent.pincode", e.permanentPostalCode);
             field("permanent.address", e.permanentAddress);
         }
@@ -136,7 +150,9 @@ public class EorCandidatePortalPage extends BasePage {
         field("account_holder_name", e.accountHolder);
         field("bank_name", e.bankName);
         field("account_no", e.accountNumber);
-        field("confirm_account_no", e.accountNumber);
+        if (!driver.findElements(By.xpath("//input[@name='confirm_account_no']")).isEmpty()) {
+            field("confirm_account_no", e.accountNumber); // the form had a confirmation box until 2026-11-17; it is filled only when it is there
+        }
         field("ifsc_code", e.ifsc);
         choose("Account Type", e.accountType);
         field("branch_name", e.branchName);
@@ -173,7 +189,26 @@ public class EorCandidatePortalPage extends BasePage {
         if (driver.findElements(employer).isEmpty()) {
             By add = By.xpath("(//*[normalize-space()='Work Experience']/following::button[normalize-space()='Add'])[1]");
             scrollTo(add);
-            click(add);
+            try {
+                // seen 2026-11-24 (preprod): the page left the button right under the sticky header and a normal click never went through; it is centred in the window first and, when
+                // the normal click still fails, the button is clicked by script (the button is real, visible and enabled: the log of that run says so)
+                WebElement button = visible(add);
+                ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'});", button);
+                pause(400);
+                try {
+                    button.click();
+                } catch (RuntimeException covered) {
+                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", button);
+                }
+            } catch (RuntimeException notClicked) {
+                // seen 2026-11-24 (preprod): the button was on the screen but could not be clicked; the log says what every "Add" button of the page looked like
+                Object seen = ((JavascriptExecutor) driver).executeScript(
+                        "return Array.from(document.querySelectorAll('button')).filter(b=>/^\\s*\\+?\\s*Add\\s*$/.test(b.innerText||'')).map(b=>{const r=b.getBoundingClientRect();"
+                                + "return 'text=['+(b.innerText||'').trim()+'] disabled='+b.disabled+' size='+Math.round(r.width)+'x'+Math.round(r.height)+' top='+Math.round(r.top)+' attrs='+Array.from(b.attributes).map(a=>a.name+'='+a.value).join(';');}).join(' || ');");
+                utils.Log.warn("Work Experience: the button \"Add\" could not be clicked. The Add buttons on the page: " + seen
+                        + " | elements with the text \"Work Experience\": " + driver.findElements(By.xpath("//*[normalize-space()='Work Experience']")).size());
+                throw notClicked;
+            }
         }
         field("work_experience.0.previous_employer", e.previousEmployer);
         field("work_experience.0.designation", e.previousDesignation);
@@ -246,6 +281,15 @@ public class EorCandidatePortalPage extends BasePage {
         click(done);
     }
 
+    /** Clicks "Logout" when the portal offers it within the given seconds; false when there is no such button. */
+    public boolean logoutIfOffered(int seconds) {
+        if (!isDisplayed(logout, seconds)) {
+            return false;
+        }
+        click(logout);
+        return true;
+    }
+
     public boolean doneOffered(int seconds) {
         return isDisplayed(done, seconds);
     }
@@ -254,8 +298,16 @@ public class EorCandidatePortalPage extends BasePage {
 
     /** Accepts the offer when it is offered within the given seconds; false when it is not there (yet). */
     public boolean acceptOfferIfAvailable(int seconds) {
+        return acceptOfferIfAvailable(seconds, null);
+    }
+
+    /** As above; {@code beforeClick} runs once the button is there and before it is clicked (the happy flow takes the picture of the offer page there). */
+    public boolean acceptOfferIfAvailable(int seconds, Runnable beforeClick) {
         if (!isDisplayed(acceptOffer, seconds)) {
             return false;
+        }
+        if (beforeClick != null) {
+            beforeClick.run();
         }
         By accepted = By.xpath("//*[contains(normalize-space(.),'You have accepted this offer')]");
         for (int attempt = 1; attempt <= 4; attempt++) {
@@ -282,6 +334,7 @@ public class EorCandidatePortalPage extends BasePage {
      * may open on a later step than the first, so every section starts by going to its own step.
      */
     private void gotoStep(String step) {
+        currentSection = step;
         By shown = By.xpath("//*[self::h2 or self::h3][normalize-space()=" + Xp.literal(step) + "]");
         if (isDisplayed(shown, 3)) {
             return;
@@ -323,6 +376,9 @@ public class EorCandidatePortalPage extends BasePage {
             return l.isEmpty() || !l.get(0).isDisplayed() ? null : l.get(0);
         });
         utils.SmoothScroll.to(driver, b);
+        if (beforeSave != null) {
+            beforeSave.accept(currentSection);
+        }
         try {
             b.click();
         } catch (org.openqa.selenium.WebDriverException covered) {
@@ -436,7 +492,106 @@ public class EorCandidatePortalPage extends BasePage {
         chooseAt(label, option, 0);
     }
 
-    /** {@code occurrence} 1, 2, ... = the first, second label of that text on the page (current and permanent address both have Country / State / City); 0 = the last one. */
+    private static final String VISIBLE_OPTIONS_JS = "const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;};"
+            + "return JSON.stringify(Array.from(document.querySelectorAll('[role=option],[cmdk-item]')).filter(vis).map(e=>(e.innerText||'').trim()));";
+
+    /** The entries of the list that is open now (empty while it is still loading). */
+    private List<String> openEntries() {
+        try {
+            Object o = ((JavascriptExecutor) driver).executeScript(VISIBLE_OPTIONS_JS);
+            List<String> out = new ArrayList<>();
+            for (String s : new com.fasterxml.jackson.databind.ObjectMapper().readValue(String.valueOf(o), String[].class)) {
+                if (!utils.EorDropdownOptions.isPlaceholder(s)) {
+                    out.add(s);
+                }
+            }
+            return out;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException | RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    private boolean visibleWithin(By by, long millis) {
+        try {
+            new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofMillis(millis))
+                    .until(org.openqa.selenium.support.ui.ExpectedConditions.visibilityOfElementLocated(by));
+            return true;
+        } catch (TimeoutException e) {
+            return false;
+        }
+    }
+
+    /** No drop-down list is open any more: Escape, then wait (at most 1.5 s) until the lists have left the page. A list that stays over the page would stop the next click. */
+    private void closeAnyList() {
+        By popper = By.xpath("//div[@data-radix-popper-content-wrapper] | //*[@role='listbox']");
+        if (driver.findElements(popper).stream().noneMatch(WebElement::isDisplayed)) {
+            return;
+        }
+        try {
+            new org.openqa.selenium.interactions.Actions(driver).sendKeys(Keys.ESCAPE).perform();
+            new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofMillis(1500))
+                    .until(d -> d.findElements(popper).stream().noneMatch(WebElement::isDisplayed));
+        } catch (RuntimeException ignored) {
+            // the next try closes it again
+        }
+    }
+
+    /**
+     * One entry of a list chosen at random (user, 2026-11-18): the list is opened, every entry it offers is read (and stored when {@code -Deor.harvest.dropdowns=true}), one entry is taken
+     * with the same chance for each, and chosen. Used for lists whose entries depend on an earlier choice (the cities of a state). Returns the entry; null when the list has no entry.
+     */
+    private String chooseRandomLive(String label, int occurrence, String storeAs) {
+        List<String> entries = liveEntries(label, occurrence, storeAs);
+        if (entries.isEmpty()) {
+            return null;
+        }
+        String picked = entries.get(utils.EorDropdownOptions.random().nextInt(entries.size()));
+        chooseAt(label, picked, occurrence);
+        return picked;
+    }
+
+    /** Opens a list, reads all its entries, closes it again. Tried again every 1.5 s while the list is empty (the cities load after the state was chosen). */
+    private List<String> liveEntries(String label, int occurrence, String storeAs) {
+        String idx = occurrence <= 0 ? "last()" : String.valueOf(occurrence);
+        By trigger = By.xpath("(" + lab(label) + "/following::*[self::button or self::select][1])[" + idx + "]");
+        long retry = ConfigManager.getInt("eor.dropdown.retry.ms", 1500);
+        for (int attempt = 1; attempt <= 6; attempt++) {
+            try {
+                closeAnyList();
+                WebElement t = visible(trigger);
+                utils.SmoothScroll.to(driver, t);
+                waitFor(timeout).until(d -> t.isEnabled() && !"true".equals(t.getAttribute("aria-disabled")));
+                t.click();
+                visibleWithin(By.xpath("(//*[@role='option' or @cmdk-item])[1]"), retry);
+                List<String> entries = openEntries();
+                if (!entries.isEmpty()) {
+                    if (ConfigManager.getBool("eor.harvest.dropdowns", false)) {
+                        utils.EorDropdownOptions.harvest(storeAs, entries);
+                    }
+                    closeList(t);
+                    return entries;
+                }
+                closeList(t);
+            } catch (org.openqa.selenium.WebDriverException lost) {
+                Log.info("The list \"" + label + "\" could not be read (try " + attempt + " of 6, " + lost.getClass().getSimpleName() + "): tried again.");
+            }
+            pause(retry);
+        }
+        return List.of();
+    }
+
+    private static void pause(long ms) {
+        try {
+            Thread.sleep(ms); // documented: the retry of a list that is not visible yet waits 1.5 s (user, 2026-11-18)
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * {@code occurrence} 1, 2, ... = the first, second label of that text on the page (current and permanent address both have Country / State / City); 0 = the last one.
+     * When an entry is not visible (the list is slow, another list still covers the page) the list is closed and tried again after 1.5 s ({@code eor.dropdown.retry.ms}).
+     */
     private void chooseAt(String label, String option, int occurrence) {
         if (option == null) {
             return;
@@ -447,27 +602,49 @@ public class EorCandidatePortalPage extends BasePage {
         utils.SmoothScroll.to(driver, t);
         waitFor(timeout).until(d -> t.isEnabled() && !"true".equals(t.getAttribute("aria-disabled"))); // State and City unlock after the Country is chosen
         if ("select".equalsIgnoreCase(t.getTagName())) {
-            new Select(t).selectByVisibleText(option);
+            Select s = new Select(t);
+            if (ConfigManager.getBool("eor.harvest.dropdowns", false)) {
+                utils.EorDropdownOptions.harvest(label, s.getOptions().stream().map(o -> o.getText().trim()).toList());
+            }
+            s.selectByVisibleText(option);
             return;
         }
         By opt = By.xpath("//*[@role='option' and normalize-space()=" + Xp.literal(option) + "] | //*[@cmdk-item and normalize-space()=" + Xp.literal(option) + "]");
         By search = By.xpath("//div[@data-radix-popper-content-wrapper]//input[contains(@placeholder,'Search')]");
         By any = By.xpath("(//*[@role='option' or @cmdk-item])[1]");
-        // the entries of a list (State after the Country, City after the State) can take a while to appear: when the entry is not there, the drop-down is closed and opened again
-        int attempts = ConfigManager.getInt("eor.dropdown.attempts", 5);
+        long retry = ConfigManager.getInt("eor.dropdown.retry.ms", 1500);
+        int attempts = ConfigManager.getInt("eor.dropdown.attempts", 6);
         for (int attempt = 1; attempt <= attempts; attempt++) {
-            t.click();
-            if (isDisplayed(search, 2)) {
-                WebElement box = driver.findElement(search);
-                box.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.BACK_SPACE);
-                box.sendKeys(option);
+            try {
+                closeAnyList(); // a list that is still open covers the page and the click on this one is refused (seen: Blood Group after Nationality)
+                WebElement trig = visible(trigger); // found again on every try: the page can draw the field again
+                try {
+                    trig.click();
+                } catch (org.openqa.selenium.ElementClickInterceptedException covered) {
+                    if (attempt < attempts) {
+                        throw covered;
+                    }
+                    ((JavascriptExecutor) driver).executeScript("arguments[0].click()", trig); // last try: the click is made by the page itself
+                }
+                if (attempt == 1 && ConfigManager.getBool("eor.harvest.dropdowns", false) && visibleWithin(any, retry)) {
+                    utils.EorDropdownOptions.harvest(label, openEntries()); // everything the list offers, before anything is typed into its search box
+                }
+                if (isDisplayed(search, 1)) {
+                    WebElement box = driver.findElement(search); // the list can be drawn again between the two lines: that is a failed try, not a failed section
+                    box.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.BACK_SPACE);
+                    box.sendKeys(option);
+                }
+                if (visibleWithin(opt, attempt == attempts ? 10_000 : retry)) {
+                    click(opt);
+                    return;
+                }
+                Log.info("The entry \"" + option + "\" of the list \"" + label + "\" was not visible (try " + attempt + " of " + attempts + "): the list is closed and tried again after " + retry + " ms.");
+            } catch (org.openqa.selenium.NoSuchElementException | org.openqa.selenium.StaleElementReferenceException | org.openqa.selenium.ElementNotInteractableException
+                    | org.openqa.selenium.TimeoutException lost) {
+                Log.info("The list \"" + label + "\" changed while it was used (try " + attempt + " of " + attempts + ", " + lost.getClass().getSimpleName() + "): tried again after " + retry + " ms.");
             }
-            if (isDisplayed(opt, attempt == attempts ? 10 : 6)) {
-                click(opt);
-                return;
-            }
-            Log.info("The entry \"" + option + "\" of the list \"" + label + "\" did not appear (try " + attempt + " of " + attempts + "): the list is closed and opened again.");
-            closeList(t);
+            closeList(driver.findElements(trigger).isEmpty() ? t : driver.findElement(trigger));
+            pause(retry);
         }
         if ("City".equals(label)) {
             t.click();
@@ -487,8 +664,8 @@ public class EorCandidatePortalPage extends BasePage {
             if ("true".equals(trigger.getAttribute("aria-expanded"))) {
                 trigger.click();
             }
-            Thread.sleep(1000); // documented: the list needs a moment to close before it is opened again
-        } catch (RuntimeException | InterruptedException ignored) {
+            closeAnyList();
+        } catch (RuntimeException ignored) {
             // the next try opens it anyway
         }
     }

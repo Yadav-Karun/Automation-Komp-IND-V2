@@ -117,6 +117,11 @@ public class EorCandidatesPage extends BasePage {
 
     /** Send Offer Letter: chooses the template and sends. Returns the name of the template that was used. */
     public String sendOfferLetter() {
+        return sendOfferLetter(null);
+    }
+
+    /** As above; {@code beforeSend} runs when the template is chosen and before "Send" is clicked (the happy flow takes the picture of the window there). */
+    public String sendOfferLetter(Runnable beforeSend) {
         click(sendOffer);
         click(templateBox);
         String wanted = ConfigManager.get("eor.offer.template", "Offer Letter");
@@ -128,8 +133,21 @@ public class EorCandidatesPage extends BasePage {
         String name = o.getText().trim();
         new Actions(driver).moveToElement(o).click().perform();
         visible(sendButton);
+        if (beforeSend != null) {
+            beforeSend.run();
+        }
         click(sendButton);
         return name;
+    }
+
+    /** The three dots of the row of this e-mail (column ACTION), then "View": the profile of the candidate opens (the list "Candidates" and the "Verify" button of the profile). */
+    public void openRowView(String email) {
+        String row = "//tr[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')," + Xp.literal(email.toLowerCase(Locale.ROOT)) + ")]";
+        visible(By.xpath(row));
+        By dots = By.xpath("(" + row + "//button[@title='Actions' or @aria-haspopup='menu'])[last()]");
+        By any = By.xpath("(" + row + "//button[not(@aria-label='Select row')])[last()]");
+        click(!driver.findElements(dots).isEmpty() ? dots : any);
+        click(By.xpath("//*[(@role='menuitem' or self::button or self::div) and normalize-space()='View']"));
     }
 
     public void markAsJoined() {

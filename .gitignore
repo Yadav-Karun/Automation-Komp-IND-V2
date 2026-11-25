@@ -18,3 +18,7 @@ testdata/aor-templates/
 testdata/aor-used-ids.txt
 testdata/aor-edge-employees.txt
 .yopmail-profile/
+
+# Mailpit (local mail catcher): binary and stored mails
+tools/mailpit/bin/
+tools/mailpit/data/

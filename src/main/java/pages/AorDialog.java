@@ -44,7 +44,20 @@ public class AorDialog extends BasePage {
 
     /** Waits for the window with this heading. */
     public void waitOpen(String heading) {
-        visible(By.xpath("//div[@role='dialog']//h2[normalize-space()=" + Xp.literal(heading) + "]"));
+        By title = By.xpath("//div[@role='dialog']//h2[normalize-space()=" + Xp.literal(heading) + "]");
+        // preprod opens some windows slowly (the Bank Sheet window was on the screen only after the 20 s were over and the page had been reloaded): wait up to 60 s
+        long end = System.currentTimeMillis() + 60_000L;
+        while (System.currentTimeMillis() < end) {
+            try {
+                if (isDisplayedNow(title)) {
+                    return;
+                }
+            } catch (RuntimeException notYet) {
+                // the window is being built
+            }
+            pause(500);
+        }
+        visible(title); // not there: the usual timeout error with the usual message
     }
 
     public boolean isOpen() {
@@ -94,13 +107,24 @@ public class AorDialog extends BasePage {
     public void dismiss() {
         try {
             driver.switchTo().activeElement().sendKeys(Keys.ESCAPE);
-            if (isOpen()) {
-                ((JavascriptExecutor) driver).executeScript(
-                        "const b=Array.from(document.querySelectorAll('[role=dialog] button, body > div.fixed button')).find(x=>/^(Cancel|Close|Done|OK)$/i.test((x.innerText||x.getAttribute('aria-label')||x.title||'').trim()));if(b)b.click();");
-                waitClosed(5);
-            }
         } catch (RuntimeException ignored) {
-            // nothing to close
+            // no element has the focus: the Close button is tried below
+        }
+        // seen 2026-11-18 (EOR upload): the panel "Creating Bulk Employees ... Done" stayed open after Escape and covered the menu, because isOpen() did not see it; so the page itself is asked
+        // whether a window with a Close / Cancel / Done button is still on the screen, and the button is clicked until it is gone (3 tries)
+        for (int i = 0; i < 3; i++) {
+            try {
+                Object clicked = ((JavascriptExecutor) driver).executeScript(
+                        "const vis=e=>{const r=e.getBoundingClientRect();const s=getComputedStyle(e);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
+                                + "const b=Array.from(document.querySelectorAll('[role=dialog] button, body > div.fixed button, [data-slot=dialog-content] button')).filter(vis)"
+                                + ".find(x=>/^(Cancel|Close|Done|OK)$/i.test((x.innerText||x.getAttribute('aria-label')||x.title||'').trim()));if(b){b.click();return true;}return false;");
+                if (!Boolean.TRUE.equals(clicked)) {
+                    return; // nothing left to close
+                }
+                waitClosed(5);
+            } catch (RuntimeException ignored) {
+                return; // nothing to close
+            }
         }
     }
 

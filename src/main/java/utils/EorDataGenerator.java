@@ -22,7 +22,7 @@ import model.EorRun;
 /**
  * Random but sensible data for the EOR employee happy flow (the rules of the QA owner's earlier project, "KOMP IND - Java"):
  * a name and a yopmail address {@code <firstnamelastname>.<M|F>@yopmail.com} (the letter tells the gender), a working location that belongs to the state,
- * an experience (Fresher / Experienced; the first employee of a run is a fresher and the second experienced, so both paths of the candidate portal are always used),
+ * an experience (Fresher / Experienced; chosen at random, 50% each, like gender and disability),
  * and the personal, contact, bank, professional, education and identification values that the employee types into the candidate portal.
  * Every e-mail address ever used is kept in {@code testdata/eor-used-emails.txt} and is never generated again (-Deor.history.file=... overrides the file).
  */
@@ -122,6 +122,31 @@ public final class EorDataGenerator {
         }
     }
 
+    /**
+     * The login address of a new employee, all lower case. Default: a yopmail address. With {@code -Dmail.provider=imap} (user, 2026-11-17): the next free VARIANT of the QA mailbox
+     * ({@code imap.address.base}, donotreply.qamail@gmail.com): {@code donotreply.qamail+1@gmail.com}, {@code +2}, ... the first number whose address is not yet in the list of used
+     * addresses ({@code testdata/eor-used-emails.txt}); every mail to a variant lands in the one mailbox. Only the EOR employees use these; everything else stays on yopmail.
+     */
+    static String mailAddress(String name, boolean male, Set<String> used) {
+        if ("imap".equalsIgnoreCase(ConfigManager.get("mail.provider", "yopmail"))) {
+            String base = ConfigManager.get("imap.address.base");
+            if (base == null || !base.contains("@")) {
+                throw new IllegalStateException("-Dmail.provider=imap needs imap.address.base (the address of the mailbox, donotreply.qamail@gmail.com) in config/secrets.local.properties.");
+            }
+            int at = base.indexOf('@');
+            String local = base.substring(0, at).trim().toLowerCase(Locale.ROOT);
+            String domain = base.substring(at).trim().toLowerCase(Locale.ROOT);
+            for (int n = 1; n < 100000; n++) {
+                String candidate = local + "+" + n + domain;
+                if (!used.contains(candidate)) {
+                    return candidate;
+                }
+            }
+            throw new IllegalStateException("No unused variant of " + base + " is left.");
+        }
+        return name.toLowerCase(Locale.ROOT) + "." + (male ? "m" : "f") + "@yopmail.com";
+    }
+
     public static EorRun newRun(int count, long seed) {
         EorRun run = new EorRun();
         LocalDateTime now = LocalDateTime.now();
@@ -136,19 +161,19 @@ public final class EorDataGenerator {
             while (true) {
                 e.firstName = pick(r, male ? MALE : FEMALE);
                 e.lastName = pick(r, LAST);
-                e.email = (e.firstName + e.lastName).toLowerCase(Locale.ROOT) + "." + (male ? "m" : "f") + "@yopmail.com";
+                e.email = mailAddress(e.firstName + e.lastName, male, used);
                 if (used.add(e.email)) {
                     break;
                 }
                 e.lastName = pick(r, LAST) + pick(r, new String[] {"A", "B", "C", "D", "E", "F"}); // same name again: add a letter
-                e.email = (e.firstName + e.lastName).toLowerCase(Locale.ROOT) + "." + (male ? "m" : "f") + "@yopmail.com";
+                e.email = mailAddress(e.firstName + e.lastName, male, used);
                 if (used.add(e.email)) {
                     break;
                 }
             }
             e.middleName = r.nextInt(100) < 20 ? pick(r, male ? MALE : FEMALE) : "";
             e.phone = (6 + r.nextInt(4)) + String.format("%09d", r.nextInt(1_000_000_000));
-            e.experience = i == 0 ? "Fresher" : i == 1 ? "Experienced" : r.nextBoolean() ? "Fresher" : "Experienced";
+            e.experience = r.nextBoolean() ? "Fresher" : "Experienced"; // 50% each (user, 2026-11-13: one employee per run, chosen at random like gender and disability)
             String[] states = STATES.keySet().toArray(new String[0]);
             e.state = states[r.nextInt(states.length)];
             e.workingLocation = STATES.get(e.state);
@@ -157,11 +182,10 @@ public final class EorDataGenerator {
             e.jobDescription = pick(r, JOBS);
             personal(e, r);
             contact(e, r);
-            e.permanentSame = i % 2 == 0; // the first employee ticks "same as current address", the second enters a separate permanent address, and so on
+            e.permanentSame = r.nextBoolean(); // 50%: either "same as current address" is ticked or a separate permanent address is entered
             if (!e.permanentSame) {
-                String[] ps = STATES.keySet().toArray(new String[0]);
-                e.permanentState = ps[r.nextInt(ps.length)];
-                e.permanentCity = STATES.get(e.permanentState);
+                e.permanentState = EorDropdownOptions.pick(r, "State", STATES.keySet().toArray(new String[0]));
+                e.permanentCity = STATES.getOrDefault(e.permanentState, "");
                 e.permanentPostalCode = String.valueOf(100000 + r.nextInt(900000));
                 e.permanentAddress = (10 + r.nextInt(900)) + ", " + pick(r, new String[] {"Hill Road", "River Side", "Temple Street", "College Road"});
             }
@@ -180,16 +204,17 @@ public final class EorDataGenerator {
     private static void personal(EorEmployee e, Random r) {
         e.fatherName = pick(r, MALE) + " " + e.lastName;
         e.motherName = pick(r, FEMALE) + " " + e.lastName;
-        e.maritalStatus = r.nextBoolean() ? "Married" : "Unmarried";
-        e.spouseName = "Married".equals(e.maritalStatus) ? pick(r, "Male".equals(e.gender) ? FEMALE : MALE) + " " + e.lastName : "";
-        e.bloodGroup = pick(r, BLOOD);
+        // every list of the candidate portal: all stored entries, the same chance for each (user, 2026-11-18); the fall-back pools are used until the entries are stored
+        e.maritalStatus = r.nextBoolean() ? "Married" : "Unmarried"; // user, 2026-11-19: only Married or Unmarried (the list also offers "Other", which the profile later refuses to save)
+        e.spouseName = pick(r, "Male".equals(e.gender) ? FEMALE : MALE) + " " + e.lastName; // used when the status is "Married" (or the relationship is "Spouse")
+        e.bloodGroup = EorDropdownOptions.pick(r, "Blood Group", BLOOD);
         e.dateOfBirth = LocalDate.of(1990 + r.nextInt(14), 1 + r.nextInt(12), 1 + r.nextInt(28)).format(DMY);
-        e.physicallyHandicapped = r.nextBoolean() ? "Yes" : "No";
+        e.physicallyHandicapped = EorDropdownOptions.pick(r, "Physically Handicapped", new String[] {"Yes", "No"});
     }
 
     private static void contact(EorEmployee e, Random r) {
         e.alternateMobile = (6 + r.nextInt(4)) + String.format("%09d", r.nextInt(1_000_000_000));
-        e.emergencyRelationship = "Married".equals(e.maritalStatus) ? pick(r, new String[] {"Father", "Mother", "Spouse", "Brother", "Sister"}) : pick(r, new String[] {"Father", "Mother", "Sister"});
+        e.emergencyRelationship = EorDropdownOptions.pick(r, "Relationship", "Married".equals(e.maritalStatus) ? new String[] {"Father", "Mother", "Spouse", "Brother", "Sister"} : new String[] {"Father", "Mother", "Sister"});
         switch (e.emergencyRelationship) {
             case "Father": e.emergencyName = e.fatherName; break;
             case "Mother": e.emergencyName = e.motherName; break;
@@ -197,9 +222,8 @@ public final class EorDataGenerator {
             default: e.emergencyName = pick(r, r.nextBoolean() ? MALE : FEMALE) + " " + e.lastName;
         }
         e.emergencyNumber = (6 + r.nextInt(4)) + String.format("%09d", r.nextInt(1_000_000_000));
-        String[] states = STATES.keySet().toArray(new String[0]);
-        e.addressState = states[r.nextInt(states.length)];
-        e.addressCity = STATES.get(e.addressState);
+        e.addressState = EorDropdownOptions.pick(r, "State", STATES.keySet().toArray(new String[0]));
+        e.addressCity = STATES.getOrDefault(e.addressState, ""); // the portal page replaces it by a city chosen at random from what the portal offers for the state
         e.postalCode = String.valueOf(100000 + r.nextInt(900000));
         e.address = (10 + r.nextInt(900)) + ", " + pick(r, new String[] {"Park Street", "Lake Road", "Station Road", "Market Lane", "Garden Avenue"});
     }
@@ -209,7 +233,7 @@ public final class EorDataGenerator {
         e.bankName = pick(r, BANKS);
         e.accountNumber = String.valueOf(1_000_000_000L + (long) (r.nextDouble() * 999_000_000_000L));
         e.ifsc = pick(r, new String[] {"HDFC", "ICIC", "SBIN", "UTIB", "KKBK"}) + "0" + String.format("%06d", r.nextInt(1_000_000)).substring(0, 6);
-        e.accountType = pick(r, new String[] {"Saving", "Current", "Salaried"});
+        e.accountType = EorDropdownOptions.pick(r, "Account Type", new String[] {"Saving", "Current", "Salaried"});
         e.branchName = e.workingLocation + " Branch";
         e.bankAddress = (10 + r.nextInt(90)) + " Main Road, " + e.workingLocation + ", " + e.state + ", India";
     }
@@ -220,15 +244,15 @@ public final class EorDataGenerator {
         e.primarySkills = pick(r, new String[] {"Java, Spring Boot, SQL", "Selenium, Java, TestNG", "Python, SQL, PostgreSQL", "AWS, Docker, Jenkins"});
         e.secondarySkills = pick(r, new String[] {"Git, Maven, Jenkins", "REST API, Git, Postman", "Docker, Git, Linux", "SQL, Git, Postman"});
         e.language = pick(r, new String[] {"English", "Hindi"});
-        e.proficiency = pick(r, new String[] {"Beginner", "Intermediate", "Expert"});
+        e.proficiency = EorDropdownOptions.pick(r, "Proficiency", new String[] {"Beginner", "Intermediate", "Expert"});
     }
 
     private static void education(EorEmployee e, Random r) {
-        e.educationLevel = pick(r, new String[] {"Masters", "Bachelor", "12th", "10th"});
+        e.educationLevel = EorDropdownOptions.pick(r, "Education Level", new String[] {"Masters", "Bachelor", "12th", "10th"});
         e.educationInstitution = pick(r, INSTITUTIONS);
         e.fieldOfStudy = pick(r, FIELDS);
         e.university = pick(r, UNIVERSITIES);
-        e.modeOfEducation = pick(r, new String[] {"Part-Time", "Regular"});
+        e.modeOfEducation = EorDropdownOptions.pick(r, "Mode of Education", new String[] {"Part-Time", "Regular"});
         e.passingYear = String.valueOf(2012 + r.nextInt(12));
         e.certificateName = pick(r, CERTIFICATES);
         e.certificateInstitution = pick(r, CERT_INSTITUTIONS);

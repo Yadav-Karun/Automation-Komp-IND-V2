@@ -1,0 +1,14 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- EMPLOYEE - EOR ONBOARDING HAPPY FLOW ("EOROnboarding - HappyFlow", owner's brief of 2026-11-25). One test class = one report folder named after the class.
+     TC-EOR-HF-00 uploads ONE workbook with two employees (row 2 Experienced + Male, row 3 Fresher + Female); then TC-EOR-HF-01 (experienced) and TC-EOR-HF-02 (fresher) run IN PARALLEL,
+     each in its own browser; TC-EOR-HF-03 (the edit flow) is not written yet and is reported as not run.
+     Creates TWO new employees per run (donotreply.qamail+N@gmail.com, recorded in testdata/eor-used-emails.txt); they cannot be deleted by automation.
+     Run:  mvn clean test -Dsuite=testng-eor-happy-flow.xml [-Denv=sandbox|preprod]
+     thread-count 2 = the two employees; the set-up case (TC-EOR-HF-00) and the edit case run alone because the others depend on them. -->
+<suite name="KOMP IND Testing - EOR Onboarding Happy Flow" verbose="1" parallel="methods" thread-count="2">
+    <test name="EOR Onboarding Happy Flow">
+        <classes>
+            <class name="tests.employee.eor.EorOnboardingHappyFlow"/>
+        </classes>
+    </test>
+</suite>

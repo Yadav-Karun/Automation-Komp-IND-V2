@@ -14,8 +14,9 @@ import org.openqa.selenium.WebDriver;
 public final class TableReader {
 
     private static final String ROWS_JS = "const h=Array.from(document.querySelectorAll('thead th')).map(t=>(t.innerText||'').trim().toUpperCase());"
-            + "return Array.from(document.querySelectorAll('tbody tr')).filter(r=>r.cells.length>=4).map(r=>{const o={};"
-            + "Array.from(r.cells).forEach((c,i)=>{o[h[i]||('COLUMN '+(i+1))]=(c.innerText||'').replace(/\\s+/g,' ').trim();});return o;});";
+            + "return JSON.stringify(Array.from(document.querySelectorAll('tbody tr')).filter(r=>r.cells.length>=4).map(r=>{const o={};"
+            + "Array.from(r.cells).forEach((c,i)=>{o[h[i]||('COLUMN '+(i+1))]=(c.innerText||'').replace(/\\s+/g,' ').trim();});return o;}));";
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
     private static final Pattern SHOWING = Pattern.compile("Showing\\s+(\\d+)\\D+(\\d+)\\s+of\\s+(\\d+)");
 
     private TableReader() {
@@ -42,8 +43,22 @@ public final class TableReader {
                 }
             }
         }
+        return parse(o);
+    }
+
+    /** The rows of a script answer: a JSON text (what the scripts of the list pages return) or, for older callers, a list of maps. */
+    @SuppressWarnings("unchecked")
+    public static List<Map<String, String>> parse(Object o) {
         List<Map<String, String>> out = new ArrayList<>();
-        if (o instanceof List) {
+        if (o instanceof String text) {
+            try {
+                for (Map<String, String> r : JSON.readValue(text, new com.fasterxml.jackson.core.type.TypeReference<List<LinkedHashMap<String, String>>>() { })) {
+                    out.add(r);
+                }
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("The rows of the list could not be read: " + e.getMessage(), e);
+            }
+        } else if (o instanceof List) {
             for (Object r : (List<Object>) o) {
                 out.add(new LinkedHashMap<>((Map<String, String>) r));
             }

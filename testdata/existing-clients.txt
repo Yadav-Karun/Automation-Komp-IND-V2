@@ -16,3 +16,5 @@ Bleach | - | the application says this name or e-mail already exists | 2026-11-0
 Shield Hero | naofumiiwatani@yopmail.com | ClientOnboardingEdgeCases | 2026-11-08 06:07:26 pm
 Fate Zero | - | the application says this name or e-mail already exists | 2026-11-08 07:10:51 pm
 Akame ga Kill | tatsumi@yopmail.com | ClientOnboardingEdgeCases | 2026-11-08 07:10:56 pm
+Inuyasha | inuyashataisho@yopmail.com | ClientOnboardingE2EHappyFlow | 2026-11-25 12:54:55 pm
+Fate Stay Night | shirouemiya@yopmail.com | ClientOnboardingE2EHappyFlow | 2026-11-25 12:57:30 pm

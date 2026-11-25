@@ -113,6 +113,12 @@ public class EorEmployee {
     public String joiningDate = "";
     public String candidateId = "";
 
+    /** The name as it was when the "Welcome Aboard" mail was sent (before the profile was edited); empty until the profile is edited. */
+    public String originalName = "";
+
+    /** After the profile edit case: what every tab of the profile must show now, tab -> rows {heading, label, value} (the values of the first look, with every change put in). */
+    public java.util.Map<String, java.util.List<java.util.List<String>>> expectedTabs = new java.util.LinkedHashMap<>();
+
     public String fullName() {
         return (firstName + " " + (middleName == null || middleName.isBlank() ? "" : middleName + " ") + lastName).trim();
     }

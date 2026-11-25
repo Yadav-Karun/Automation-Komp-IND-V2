@@ -28,6 +28,7 @@ import reporting.ScenarioBoard;
 import reporting.TestReporter;
 import reporting.ValueChecks;
 import utils.ConfigManager;
+import utils.PlainText;
 
 /**
  * AOR LIST SCREENS - negative and edge cases (user, 2026-11-13): the three lists of the AOR user - AOR Agents, AOR Payroll and AOR Invoices - are checked the way the Clients list and
@@ -100,6 +101,21 @@ public class AorListScreensEdgeCases extends BaseTest {
         Assert.assertEquals(failed, 0L, failed + " scenario(s) of " + tc + " found problems in the application (see the scenario entries of the report)");
     }
 
+    /**
+     * Problems that are already known (user, 2026-11-17): {tc|scenario id} -> {label shown instead of FAIL, Jira ticket or "", note}. A scenario in this list still RUNS (to verify
+     * whether the developers fixed it): when it fails it shows the label, when it passes it passes. Scenarios of "Recheck this issue" are not in the list: they run normally.
+     */
+    private static final java.util.Map<String, String[]> KNOWN = java.util.Map.ofEntries(
+            java.util.Map.entry("TC-AOR-LIST-01|L06", new String[] {"KTI-252", "KTI-252", "Assigned to Dev (Jira KTI-252)"}),
+            java.util.Map.entry("TC-AOR-LIST-02|L06", new String[] {"KTI-252", "KTI-252", "Assigned to Dev (Jira KTI-252)"}),
+            java.util.Map.entry("TC-AOR-LIST-01|O-STATE", new String[] {"KTI-253", "KTI-253", "Assigned to Dev (Jira KTI-253)"}),
+            java.util.Map.entry("TC-AOR-LIST-01|O-CLIENT", new String[] {"KTI-253", "KTI-253", "Assigned to Dev (Jira KTI-253)"}),
+            java.util.Map.entry("TC-AOR-LIST-01|O-STATUS", new String[] {"KTI-253", "KTI-253", "Assigned to Dev (Jira KTI-253)"}),
+            java.util.Map.entry("TC-AOR-LIST-02|O-STATE", new String[] {"KTI-253", "KTI-253", "Assigned to Dev (Jira KTI-253)"}),
+            java.util.Map.entry("TC-AOR-LIST-01|K1", new String[] {"KTI-254", "KTI-254", "Assigned to Dev (Jira KTI-254)"}),
+            java.util.Map.entry("TC-AOR-LIST-02|D4", new String[] {"CLIENT TO DECIDE", "", "The client will decide whether a pay period in 1900 may exist"}),
+            java.util.Map.entry("TC-AOR-LIST-03|D1", new String[] {"MANUAL CHECK", "", "The user will check this one by hand once the site is up"}));
+
     private String headline() {
         return "AOR list: " + (spec == null ? "" : spec.name) + " | signed in as " + utils.SecretMasker.maskEmail(ConfigManager.aorEmail()) + " | scenarios run: " + ran;
     }
@@ -114,8 +130,14 @@ public class AorListScreensEdgeCases extends BaseTest {
         ran++;
         TestReporter r = TestReporter.startScenario(tc, sid, List.of(tag), title, "What is checked: " + title, "The list \"" + spec.name + "\" as it is shown", expected, driver, holder, this::headline);
         r.captureFullApi();
+        String[] known = KNOWN.get(tc + "|" + sid);
+        if (known != null) {
+            r.knownIssue(known[0], known[1], known[2]);
+        }
         r.steps("S00".equals(sid) ? List.of("Open the login page of the application", "Sign in as the AOR user and open the list \"" + spec.name + "\"")
                 : List.of("Sign in as the AOR user and open the list \"" + spec.name + "\"", "On the list: " + title, "Compare what the list shows with what the whole list holds (every page read once)"));
+        r.describe("S00".equals(sid) ? List.of("We open the application and sign in as the AOR user.", "The list \"" + spec.name + "\" must open and show rows.")
+                : List.of("On the list \"" + spec.name + "\" we do this: " + title + ".", "We compare what the screen shows with what the whole list holds (every page is read once)."));
         rep = r;
         Throwable error = null;
         SkipException skip = null;
@@ -167,6 +189,7 @@ public class AorListScreensEdgeCases extends BaseTest {
             String text = list.pageText().toLowerCase(Locale.ROOT);
             c.check(screen, "A readable message says that nothing was found", text.contains("no ") && (text.contains("found") || text.contains("result") || text.contains("match")), "a message like \"No ... found\"",
                     shorten(list.pageText()));
+            rep.evidence("search_no_match", "The list searched with a text that matches nothing (before the search box is cleared)");
             list.search("");
         });
         String[][] odd = {{"L08", "<script>alert(1)</script>"}, {"L09", "%"}, {"L10", "'"}, {"L11", "\"; DROP TABLE agents;--"}, {"L12", "\\"}, {"L13", "A".repeat(300)}, {"L14", "_"}, {"L15", "éñü"},
@@ -207,6 +230,7 @@ public class AorListScreensEdgeCases extends BaseTest {
                 } else {
                     c.check(tab, "An empty tab says so", list.pageText().toLowerCase(Locale.ROOT).contains("no "), "a message", shorten(list.pageText()));
                 }
+                rep.evidence("tab_" + (n_tab(tab)), "The list on the tab \"" + tab + "\" (before the first tab is opened again)");
                 list.clickTab(spec.tabs[0]);
             });
         }
@@ -234,6 +258,7 @@ public class AorListScreensEdgeCases extends BaseTest {
                     long expected = full.stream().filter(r -> list.column(r, spec.clientHeader).equals(client)).count();
                     c.check(client, "Every shown entry belongs to the client", only, "only \"" + client + "\"", only ? "yes" : "other clients are shown");
                     c.check(client, "The total equals the entries of the client", list.total() == expected, String.valueOf(expected), String.valueOf(list.total()));
+                    rep.evidence("filter_client", "The list filtered by the client \"" + client + "\" (before \"Clear all\")");
                     c.check(client, "\"Clear all\" is offered", list.clearAllFilters(), "the button \"Clear all\"", "not offered");
                     c.check(client, "After \"Clear all\" the whole list is back", list.total() == full.size(), String.valueOf(full.size()), String.valueOf(list.total()));
                 });
@@ -250,6 +275,7 @@ public class AorListScreensEdgeCases extends BaseTest {
                 List<Map<String, String>> rows = list.search(term);
                 boolean ok = rows.stream().allMatch(r -> list.column(r, spec.clientHeader).equals(c1) && contains(r, term));
                 c.check(c1 + " + \"" + term + "\"", "Only entries that fit BOTH", ok, "client \"" + c1 + "\" and the text \"" + term + "\"", rows.size() + " rows");
+                rep.evidence("filter_and_search", "The list with the client filter and the search text together (before they are cleared)");
                 list.search("");
                 list.clearAllFilters();
             });
@@ -260,6 +286,7 @@ public class AorListScreensEdgeCases extends BaseTest {
                 c.check(spec.name, "The filter offers clients", !options.isEmpty(), "at least one client", options.size() + " clients");
                 list.selectClient(options.get(0));
                 c.check(spec.name, "The total is not larger than the whole list", list.total() <= full.size(), "at most " + full.size(), String.valueOf(list.total()));
+                rep.evidence("filter_client", "The list with the first client of the filter chosen (before \"Clear all\")");
                 list.clearAllFilters();
                 c.check(spec.name, "After \"Clear all\" the whole list is back", list.total() == full.size(), String.valueOf(full.size()), String.valueOf(list.total()));
             });
@@ -317,19 +344,28 @@ public class AorListScreensEdgeCases extends BaseTest {
                 for (Map<String, String> r : full) {
                     values.add(list.column(r, header));
                 }
-                if (values.stream().anyMatch(v -> !v.matches("[A-Za-z0-9 \\-]*"))) {
-                    throw new SkipException("Not run: the values of this column contain symbols (their order is the application's own collation).");
-                }
+                // The order is compared in plain letters (capitals and symbols ignored). Only when one of the 10 entries that must stand on page 1 itself has a symbol (O'Brien-Smith Jr.) the
+                // order of that entry is the application's own and the scenario cannot judge it; a symbol somewhere else in the list does not matter (user, 2026-11-17: the name sort must be tested).
+                java.util.Comparator<String> plain = java.util.Comparator.comparing((String v) -> v.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 ]", "")).thenComparing(String.CASE_INSENSITIVE_ORDER);
                 List<String> asc = new ArrayList<>(values);
-                asc.sort(String.CASE_INSENSITIVE_ORDER);
+                asc.sort(plain);
+                List<String> descAll = new ArrayList<>(asc);
+                java.util.Collections.reverse(descAll);
+                boolean symbolOnPage = asc.subList(0, Math.min(10, asc.size())).stream().anyMatch(v -> !v.matches("[A-Za-z0-9 ]*"))
+                        || descAll.subList(0, Math.min(10, descAll.size())).stream().anyMatch(v -> !v.matches("[A-Za-z0-9 ]*"));
+                if (symbolOnPage) {
+                    throw new SkipException("Not run: one of the entries that must stand on page 1 has a symbol in its value (its place is the application's own order).");
+                }
                 list.sortBy(header);
                 List<String> shown = column(header);
                 c.check(header, "First click: A to Z over the whole list", shown.equals(asc.subList(0, Math.min(10, asc.size()))), asc.subList(0, Math.min(10, asc.size())).toString(), shown.toString());
+                rep.evidence("sort_first_click", "The list after the first click on \"" + header + "\"");
                 list.sortBy(header);
                 List<String> desc = new ArrayList<>(asc);
                 java.util.Collections.reverse(desc);
                 shown = column(header);
                 c.check(header, "Second click: Z to A over the whole list", shown.equals(desc.subList(0, Math.min(10, desc.size()))), desc.subList(0, Math.min(10, desc.size())).toString(), shown.toString());
+                rep.evidence("sort_second_click", "The list after the second click on \"" + header + "\"");
                 list.sortBy(header);
                 shown = column(header);
                 c.check(header, "Third click: back to the original order", shown.equals(values.subList(0, Math.min(10, values.size()))), values.subList(0, Math.min(10, values.size())).toString(), shown.toString());
@@ -353,6 +389,7 @@ public class AorListScreensEdgeCases extends BaseTest {
                     list.toggleColumn(item);
                     c.check(item, "Hidden: the cells of the row become fewer", list.firstRowCells() == cells - 1, String.valueOf(cells - 1), String.valueOf(list.firstRowCells()));
                     c.check(item, "Hidden: the heading is gone", list.headers().size() == headersBefore.size() - 1, String.valueOf(headersBefore.size() - 1), String.valueOf(list.headers().size()));
+                    rep.evidence("column_hidden_" + item.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "_"), "The list with the column \"" + item + "\" hidden");
                     list.toggleColumn(item);
                     c.check(item, "Shown again: everything is back", list.firstRowCells() == cells && list.headers().size() == headersBefore.size(), cells + " cells", list.firstRowCells() + " cells");
                 }
@@ -371,8 +408,15 @@ public class AorListScreensEdgeCases extends BaseTest {
                 List<Map<String, String>> rows = list.rows();
                 long expected = full.stream().filter(r -> day.equals(dateOf(r))).count();
                 boolean only = rows.stream().allMatch(r -> day.equals(dateOf(r)));
-                c.check(day.toString(), "Every shown entry is of that day", only, "only " + day, only ? "yes" : "other days are shown");
-                c.check(day.toString(), "The total equals the entries of that day", list.total() == expected, String.valueOf(expected), String.valueOf(list.total()));
+                c.check(day.toString(), "The entries of that day are found", !rows.isEmpty() || expected == 0, PlainText.count((int) expected, "entry", "entries") + " dated " + day + " in the whole list",
+                        rows.isEmpty() ? "nothing is found" : PlainText.count(rows.size(), "entry", "entries") + " listed on this page");
+                if (!rows.isEmpty()) {
+                    c.check(day.toString(), "Every shown entry is of that day", only, "only " + day, only ? "yes" : "other days are shown");
+                }
+                int dayTotal = list.total();
+                c.check(day.toString(), "The total equals the entries of that day", dayTotal == expected || (dayTotal < 0 && expected == 0), String.valueOf(expected),
+                        dayTotal < 0 ? "no total is shown (the page lists nothing)" : String.valueOf(dayTotal));
+                rep.evidence("dates_one_day", "The list with the day " + day + " chosen in both date boxes (before the dates are cleared)");
                 list.clearDates();
                 c.check(day.toString(), "After clearing the dates the whole list is back", list.total() == full.size(), String.valueOf(full.size()), String.valueOf(list.total()));
             });
@@ -381,24 +425,49 @@ public class AorListScreensEdgeCases extends BaseTest {
                 LocalDate day = LocalDate.now();
                 list.setDates(day, day.minusDays(10));
                 c.check(spec.name, "No entry is shown", list.rows().isEmpty(), "no rows", list.rows().size() + " rows");
+                rep.evidence("dates_result", "The list with these dates chosen (before the dates are cleared)");
                 list.clearDates();
             });
-            s("D3", "Dates", "Dates far in the future (year 2099) show nothing", "No entries", c -> {
-                list.open();
-                list.setDates(LocalDate.of(2099, 1, 1), LocalDate.of(2099, 12, 31));
-                c.check(spec.name, "No entry is shown", list.rows().isEmpty(), "no rows", list.rows().size() + " rows");
-                list.clearDates();
-            });
-            s("D4", "Dates", "Dates far in the past (year 1900) show nothing", "No entries", c -> {
-                list.open();
-                list.setDates(LocalDate.of(1900, 1, 1), LocalDate.of(1900, 12, 31));
-                c.check(spec.name, "No entry is shown", list.rows().isEmpty(), "no rows", list.rows().size() + " rows");
-                list.clearDates();
-            });
+            farDates("D3", "Dates far in the future (year 2099): only the entries inside those dates are shown (none when the list has none there)", LocalDate.of(2099, 1, 1), LocalDate.of(2099, 12, 31));
+            farDates("D4", "Dates far in the past (year 1900): only the entries inside those dates are shown (none when the list has none there)", LocalDate.of(1900, 1, 1), LocalDate.of(1900, 12, 31));
         }
     }
 
     // ================================================================================================================================ helpers
+
+    /**
+     * Dates far away from today: the list shows exactly the entries of the whole list that lie inside the dates - none when the list has none there. (The earlier version expected
+     * "no rows" and failed on 3 payroll sessions of 1900 that an earlier Payee Sheet scenario had created: the filter was right.)
+     */
+    private void farDates(String sid, String title, LocalDate from, LocalDate to) {
+        s(sid, "Dates", title, "Entries inside the dates only; the total equals their number", c -> {
+            list.open();
+            LocalDate probe = full.isEmpty() ? null : dateOf(full.get(0));
+            if (probe == null) {
+                throw new SkipException("Not run: the date format of the column \"" + spec.dateHeader + "\" is not understood.");
+            }
+            list.setDates(from, to);
+            long expected = full.stream().filter(r -> {
+                LocalDate x = dateOf(r);
+                return x != null && !x.isBefore(from) && !x.isAfter(to);
+            }).count();
+            List<Map<String, String>> rows = list.rows();
+            boolean inside = rows.stream().allMatch(r -> {
+                LocalDate x = dateOf(r);
+                return x != null && !x.isBefore(from) && !x.isAfter(to);
+            });
+            c.check(from + " to " + to, "Every shown entry lies inside the dates", inside, "only entries from " + from + " to " + to, inside ? (rows.isEmpty() ? "no entry is shown" : "yes") : "entries outside the dates are shown");
+            int total = list.total();
+            c.check(from + " to " + to, "The total equals the entries inside the dates", total == expected || (total < 0 && expected == 0), String.valueOf(expected),
+                    total < 0 ? "no total is shown (the page lists nothing)" : String.valueOf(total));
+            rep.evidence("dates_result", "The list with the dates " + from + " to " + to + " chosen (before the dates are cleared)");
+            list.clearDates();
+        });
+    }
+
+    private static String n_tab(String tab) {
+        return tab.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "_");
+    }
 
     private String keyOf(Map<String, String> row) {
         String v = list.column(row, spec.searchHeaders[spec.searchHeaders.length > 1 ? 1 : 0]);
@@ -409,10 +478,11 @@ public class AorListScreensEdgeCases extends BaseTest {
         return v.trim();
     }
 
+    /** The row contains the text in ANY cell: the search of the lists also looks at columns such as the Delivery Hub, not only at the name and the ids (seen: a hub named "<script>alert(1)</script>" was found). */
     private boolean contains(Map<String, String> row, String term) {
         String t = term.trim().toLowerCase(Locale.ROOT);
-        for (String h : spec.searchHeaders) {
-            if (list.column(row, h).toLowerCase(Locale.ROOT).contains(t)) {
+        for (String cell : row.values()) {
+            if (cell.toLowerCase(Locale.ROOT).contains(t)) {
                 return true;
             }
         }
@@ -426,8 +496,16 @@ public class AorListScreensEdgeCases extends BaseTest {
             List<Map<String, String>> rows = list.search(actual);
             long expected = full.stream().filter(r -> contains(r, actual)).count();
             boolean allContain = rows.stream().allMatch(r -> contains(r, actual));
-            c.check("Search \"" + shorten(actual) + "\"", "Every listed entry contains the text", allContain, "only matching entries", allContain ? "yes" : "entries that do not contain the text are listed");
-            c.check("Search \"" + shorten(actual) + "\"", "The total equals the entries that contain the text", list.total() == expected, String.valueOf(expected), String.valueOf(list.total()));
+            String where = "Search \"" + shorten(actual) + "\"";
+            c.check(where, "The application finds the entries that contain the text", !rows.isEmpty() || expected == 0, PlainText.count((int) expected, "entry", "entries") + " listed",
+                    rows.isEmpty() ? "nothing found" : PlainText.count(rows.size(), "entry", "entries") + " listed on this page");
+            if (!rows.isEmpty()) {
+                c.check(where, "Every listed entry contains the text", allContain, "only matching entries", allContain ? "yes" : "entries that do not contain the text are listed");
+            }
+            int total = list.total();
+            c.check(where, "The total equals the entries that contain the text", total == expected || (total < 0 && expected == 0), String.valueOf(expected),
+                    total < 0 ? "no total is shown (the page lists nothing)" : String.valueOf(total));
+            rep.evidence("search_result", "The list while it is searched for \"" + shorten(actual) + "\" (before the search box is cleared)");
             list.search("");
         });
     }
@@ -460,7 +538,9 @@ public class AorListScreensEdgeCases extends BaseTest {
             long expected = full.stream().filter(r -> contains(r, term)).count();
             boolean allContain = rows.stream().allMatch(r -> contains(r, term));
             c.check(spec.name, "Only matching entries are listed (or none)", allContain, "matching entries only", allContain ? "yes" : rows.size() + " rows, some do not contain the text");
-            c.check(spec.name, "The total equals the entries that contain the text", list.total() == expected || rows.isEmpty() && expected == 0, String.valueOf(expected), String.valueOf(list.total()));
+            c.check(spec.name, "The total equals the entries that contain the text", list.total() == expected || rows.isEmpty() && expected == 0, String.valueOf(expected),
+                    list.total() < 0 ? "no total is shown (the page lists nothing)" : String.valueOf(list.total()));
+            rep.evidence("search_result", "The list while it is searched (before the search box is cleared)");
             boolean serverError = rep.observeApi().stream().skip(0).anyMatch(a -> a.isServerError());
             c.check(spec.name, "No request ended in a server error", !serverError, "no server error", serverError ? "a request ended in a server error" : "none");
             c.check(spec.name, "The page keeps working (the search box is still there)", !driver.findElements(spec.search).isEmpty(), "the search box", "present");

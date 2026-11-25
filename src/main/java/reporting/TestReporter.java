@@ -58,6 +58,21 @@ public final class TestReporter {
     private final List<String> defectHeadlines = new ArrayList<>();
     /** The DEFECT screenshot taken during the current phase (the phase result row reuses it). */
     private String phaseDefectShot;
+    /** How many of the problems found are only about the wording of a message (they make a PARTIAL FAIL, not a FAIL). */
+    private int wordingDefects;
+    /** A problem that is already known (user, 2026-11-17): the Jira ticket (or the words "client will decide"); a failing scenario then shows this instead of FAIL. */
+    private String knownLabel;
+    private String knownTicket;
+    private String knownNote;
+
+    /** Marks the scenario as a known issue: when it fails it is shown with {@code label} (the ticket number) and not as a new failure; when it passes it passes. */
+    public TestReporter knownIssue(String label, String ticket, String note) {
+        this.knownLabel = label;
+        this.knownTicket = ticket == null || ticket.isBlank() ? null : ticket;
+        this.knownNote = note;
+        return this;
+    }
+
     /** HTML shown under Expected / Actual of the current phase (the table of {@link ValueChecks}). */
     private String phaseHtml = "";
     private String testName;
@@ -169,6 +184,7 @@ public final class TestReporter {
         RunBanner.ensure(driver); // the progress box is on the screen for the person who watches the run
         carried.clear();
         int defectsBefore = defects.size();
+        int wordingBefore = wordingDefects;
         phaseDefectShot = null;
         phaseHtml = "";
         try {
@@ -178,8 +194,15 @@ public final class TestReporter {
                 // the phase ran to the end but found a product defect (soft check): the phase result is FAIL, never PASS
                 String shot = phaseDefectShot != null ? phaseDefectShot : ScreenshotManager.capture(driver, fileName(idx, "FAIL"), true);
                 shots.add(shot);
-                node.fail(detail(expected, "PROBLEM FOUND - " + actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
-                results.add(new String[] { String.valueOf(idx), title, "FAIL", shot });
+                boolean wordingOnlyStep = wordingDefects - wordingBefore >= defects.size() - defectsBefore;
+                if (knownLabel != null) {
+                    node.info(detail(expected, "KNOWN ISSUE (" + knownLabel + ") - " + actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
+                } else if (wordingOnlyStep) {
+                    node.warning(detail(expected, "ONLY THE WORDING IS A PROBLEM - " + actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
+                } else {
+                    node.fail(detail(expected, "PROBLEM FOUND - " + actual) + phaseHtml + technical(apiHtml(idx, title, calls)), media(shot));
+                }
+                results.add(new String[] { String.valueOf(idx), title, knownLabel != null ? "KNOWN" : wordingOnlyStep ? "PARTIAL" : "FAIL", shot });
                 recordPhase(idx, title, expected, "PROBLEM FOUND - " + SecretMasker.mask(actual), "FAIL", shot);
                 Log.error(String.format("Phase %02d FAIL (defect) - %s | %s", idx, title, actual));
                 return;
@@ -253,6 +276,9 @@ public final class TestReporter {
             }
             if (checks.failed() > 0) {
                 defect(title, expected, checks.failureText(), false, checks.failureText());
+                if (checks.wordingOnly()) {
+                    wordingDefects++;
+                }
             }
             return checks.summary();
         });
@@ -309,6 +335,9 @@ public final class TestReporter {
     private void defect(String title, String expected, String actual, boolean screenshot, String headline) {
         title = PlainText.simplify(title);
         String line = "Step " + seq + " - " + title + " | What should happen: " + PlainText.simplify(expected) + " | What happened: " + PlainText.simplify(actual);
+        if (isWording(title)) {
+            wordingDefects++;
+        }
         defects.add(line);
         defectHeadlines.add(SecretMasker.mask(PlainText.simplify(headline)));
         record.defects.add(title + " | expected: " + expected + " | actual: " + SecretMasker.mask(actual));
@@ -316,7 +345,11 @@ public final class TestReporter {
             String shot = ScreenshotManager.capture(driver, fileName(seq, "DEFECT"), true);
             record.defectScreenshot = shot;
             phaseDefectShot = shot;
-            node.fail("<b>PROBLEM FOUND:</b> " + esc(title) + detail(expected, actual), media(shot));
+            if (isWording(title)) {
+                node.warning("<b>ONLY THE WORDING IS A PROBLEM:</b> " + esc(title) + detail(expected, actual), media(shot));
+            } else {
+                node.fail("<b>PROBLEM FOUND:</b> " + esc(title) + detail(expected, actual), media(shot));
+            }
         }
         Log.error("DEFECT " + line);
     }
@@ -326,6 +359,16 @@ public final class TestReporter {
             node.info(esc(PlainText.simplify(message)));
         }
         Log.info(message);
+    }
+
+    /** A problem whose title says the application's message is in programmer or technical wording: only the wording is wrong. */
+    private static boolean isWording(String title) {
+        return title != null && (title.startsWith("The message shows developer text") || title.startsWith("The message shows technical text"));
+    }
+
+    /** True when problems were found and every one of them is only about the wording of a message. */
+    public boolean onlyWording() {
+        return !defects.isEmpty() && wordingDefects >= defects.size();
     }
 
     public List<String> defects() {
@@ -396,6 +439,8 @@ public final class TestReporter {
             nameTheFailure(failure);
         } else if ("SKIP".equals(overall)) {
             nameTheSkip(failure);
+        } else {
+            setSummary("PASSED", "Everything that was checked behaved as expected.");
         }
         record.status = overall;
         record.ended = ended;
@@ -469,10 +514,15 @@ public final class TestReporter {
                 why = "see the steps below";
             }
             why = PlainText.oneLine(PlainText.simplify(why), 480);
-            test.getModel().setDescription(plain("FAILED because: " + why + "  |  What was checked: " + description));
+            setSummary("FAILED", why);
         } catch (RuntimeException e) {
             Log.warn("Failed case not renamed in the report: " + e.getClass().getSimpleName());
         }
+    }
+
+    /** The description without a leading "What is checked: " (the line already says "What was checked:"). */
+    private String checkedText() {
+        return description == null ? "" : description.replaceFirst("^What is checked:\\s*", "");
     }
 
     /** A skipped case says why right under its title (the reason is not hidden in the folded summary). */
@@ -480,9 +530,42 @@ public final class TestReporter {
         try {
             String why = skip == null || skip.getMessage() == null ? "see the summary below" : PlainText.assertion(SecretMasker.mask(skip.getMessage()));
             why = PlainText.oneLine(PlainText.simplify(why), 480);
-            test.getModel().setDescription(plain((skipWord == null ? "NOT RUN" : skipWord) + " because: " + why + "  |  What was checked: " + description));
+            setSummary(skipWord == null ? "NOT RUN" : skipWord, why);
         } catch (RuntimeException e) {
             Log.warn("Skipped case not renamed in the report: " + e.getClass().getSimpleName());
+        }
+    }
+
+    /** The points that describe a scenario in everyday words ("We upload ...", "A good application ..."); set by the test class. */
+    private List<String> descriptionPoints;
+
+    public TestReporter describe(List<String> points) {
+        this.descriptionPoints = points;
+        return this;
+    }
+
+    /**
+     * The text under the title of every entry: a DESCRIPTION of the test in a few short points and everyday words (user, 2026-11-14). What was expected and what happened are
+     * NOT repeated here: they stand below (Expected, Actual, the steps). For a case that has no such head (journeys) the reason of a failure or skip is one more point.
+     */
+    private void setSummary(String result, String found) {
+        try {
+            List<String> points = new ArrayList<>();
+            if (scenarioId != null) {
+                points.addAll(descriptionPoints != null ? descriptionPoints : List.of(checkedText()));
+            } else {
+                points.add(checkedText());
+                if (found != null && !found.isBlank() && !"PASSED".equals(result)) {
+                    points.add(("FAILED".equals(result) ? "Failed because: " : "Not run because: ") + found);
+                }
+            }
+            StringBuilder html = new StringBuilder("<ul style='margin:4px 0 0 18px;padding:0;line-height:1.55'>");
+            for (String p : points) {
+                html.append("<li>").append(esc(PlainText.oneLine(PlainText.simplify(p), 260))).append("</li>");
+            }
+            test.getModel().setDescription(html.append("</ul>").toString());
+        } catch (RuntimeException e) {
+            Log.warn("The description of an entry could not be written: " + e.getClass().getSimpleName());
         }
     }
 
@@ -496,7 +579,7 @@ public final class TestReporter {
 
     /** PASS / FAIL / SKIP in words. */
     private static String resultWord(String status) {
-        return "PASS".equals(status) ? "Passed" : "SKIP".equals(status) ? "Not run" : "Failed";
+        return "PASS".equals(status) ? "Passed" : "SKIP".equals(status) ? "Not run" : "PARTIAL".equals(status) ? "Partly failed (only the wording of a message)" : "KNOWN".equals(status) ? "Known issue" : "Failed";
     }
 
     /** Evidence for developers (server requests, error traces) goes into a folded block, so the text above it stays readable for everybody. */
@@ -668,10 +751,14 @@ public final class TestReporter {
             test.assignCategory(ref);
         }
         Throwable cause = failure != null ? failure : v == ScenarioBoard.Verdict.PASS ? null : new org.testng.SkipException(reason == null ? v.label : reason);
-        finish(v == ScenarioBoard.Verdict.PASS ? "PASS" : v == ScenarioBoard.Verdict.FAIL ? "FAIL" : "SKIP", cause);
-        if (v != ScenarioBoard.Verdict.PASS && v != ScenarioBoard.Verdict.FAIL) {
+        boolean failedKind = v == ScenarioBoard.Verdict.FAIL || v == ScenarioBoard.Verdict.PARTIAL_FAIL;
+        finish(v == ScenarioBoard.Verdict.PASS ? "PASS" : failedKind ? "FAIL" : "SKIP", cause);
+        setSummary(v == ScenarioBoard.Verdict.PASS ? "PASSED" : v == ScenarioBoard.Verdict.FAIL ? "FAILED" : v.label, null);
+        if ((v != ScenarioBoard.Verdict.PASS && v != ScenarioBoard.Verdict.FAIL) || (v == ScenarioBoard.Verdict.PASS && knownLabel != null)) {
             try {
-                test.getModel().setName(plain(testName + " [" + v.label + "]"));
+                // a known issue keeps its ticket in the name: blue when it still fails, GREEN (Pass) when it passes now - "[KTI-252 - passes now]"
+                String shown = v == ScenarioBoard.Verdict.KNOWN_DEFECT && knownLabel != null ? knownLabel : v == ScenarioBoard.Verdict.PASS ? knownLabel + " - passes now" : v.label;
+                test.getModel().setName(plain(testName + " [" + shown + "]"));
             } catch (RuntimeException ignored) {
                 // the name stays as it was
             }
@@ -705,7 +792,7 @@ public final class TestReporter {
             v = msg.contains("network connection") || msg.contains("limit") || msg.contains("prerequisite") || msg.startsWith("Blocked: ") ? ScenarioBoard.Verdict.BLOCKED : ScenarioBoard.Verdict.NOT_RUN;
             reason = msg;
         } else if (found > 0) {
-            v = ScenarioBoard.Verdict.FAIL;
+            v = knownLabel != null ? ScenarioBoard.Verdict.KNOWN_DEFECT : onlyWording() ? ScenarioBoard.Verdict.PARTIAL_FAIL : ScenarioBoard.Verdict.FAIL;
             kind = ScenarioBoard.Kind.APPLICATION_DEFECT;
             for (String h : defectHeadlines) {
                 String ref = ScenarioBoard.autoRef(h);
@@ -716,7 +803,16 @@ public final class TestReporter {
             if (refs.isEmpty()) {
                 refs.add(ScenarioBoard.autoRef(defects.get(0)));
             }
-            reason = found + (found == 1 ? " problem" : " problems") + " found in the application (see the steps below).";
+            if (v == ScenarioBoard.Verdict.KNOWN_DEFECT) {
+                refs.clear();
+                if (knownTicket != null) {
+                    ScenarioBoard.defect(knownTicket, "-", knownNote, "");
+                    refs.add(knownTicket);
+                }
+            }
+            reason = v == ScenarioBoard.Verdict.KNOWN_DEFECT ? "Already known: " + knownNote + " (the scenario still shows the problem)."
+                    : v == ScenarioBoard.Verdict.PARTIAL_FAIL ? "Only the wording of the application's messages is a problem (see the steps below)."
+                    : found + (found == 1 ? " problem" : " problems") + " found in the application (see the steps below).";
         } else if (error != null) {
             v = ScenarioBoard.Verdict.NOT_JUDGED;
             kind = ScenarioBoard.Kind.AUTOMATION_FAILURE;
@@ -803,10 +899,12 @@ public final class TestReporter {
     private static final int BODY_LIMIT = 30000;
 
     /** Plain words for the verdict of an entry. */
-    private static String verdictWords(ScenarioBoard.Verdict v) {
+    private String verdictWords(ScenarioBoard.Verdict v) {
         return switch (v) {
             case PASS -> "Passed";
             case FAIL -> "Failed";
+            case PARTIAL_FAIL -> "Partly failed (only the wording of the messages)";
+            case KNOWN_DEFECT -> "Known issue" + (knownLabel == null ? "" : " " + knownLabel) + (knownNote == null ? "" : " (" + knownNote + ")");
             case NOT_RUN -> "Not run";
             case BLOCKED -> "Blocked (something this scenario needs was missing)";
             case NOT_JUDGED -> "Could not be judged";
@@ -837,15 +935,16 @@ public final class TestReporter {
             }
         }
         String headline = record.title;
-        if (v == ScenarioBoard.Verdict.FAIL && !defectRefs.isEmpty()) {
+        if ((v == ScenarioBoard.Verdict.FAIL || v == ScenarioBoard.Verdict.PARTIAL_FAIL) && !defectRefs.isEmpty()) {
             headline = ScenarioBoard.defectTitle(defectRefs.get(0));
         }
         String area = String.valueOf(record.group).replace(", ", " / ");
         sb.append("<div class='kc-title'>").append(esc(PlainText.simplify(headline))).append("</div><div class='kc-meta'>");
-        if (v == ScenarioBoard.Verdict.FAIL) {
+        if (v == ScenarioBoard.Verdict.FAIL || v == ScenarioBoard.Verdict.PARTIAL_FAIL) {
             sb.append("Severity: ").append(severity.isEmpty() ? "not rated" : esc(severity)).append(" &middot; Priority: ").append(priorityOf(severity)).append(" &middot; Area: ").append(esc(area));
         } else {
-            sb.append("Result: ").append(esc(verdictWords(v))).append(" &middot; Area: ").append(esc(area));
+            sb.append("Result: ").append(esc(verdictWords(v))).append(v == ScenarioBoard.Verdict.PASS && knownLabel != null ? " &middot; Known issue " + esc(knownLabel) + (knownNote == null ? "" : " (" + esc(knownNote) + ")")
+                    + ": it passes in this run, so it may be fixed - please verify" : "").append(" &middot; Area: ").append(esc(area));
         }
         sb.append(" &middot; Scenario ").append(scenarioNo).append(" of ").append(esc(parentTc)).append(" (id ").append(esc(scenarioId)).append(")</div>");
 

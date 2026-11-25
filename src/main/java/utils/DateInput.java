@@ -17,7 +17,21 @@ public final class DateInput {
 
     public static void type(WebDriver driver, WebElement input, LocalDate date) {
         utils.SmoothScroll.to(driver, input);
-        input.click();
+        // seen 2026-11-18 (EOR candidate portal): "element click intercepted ... not clickable at point" while the page was still moving after the list of the field before had closed;
+        // the click is repeated after the page has been scrolled to the box again, and as the last resort the box is focused by the page (typing the digits needs only the focus)
+        for (int attempt = 1; ; attempt++) {
+            try {
+                input.click();
+                break;
+            } catch (org.openqa.selenium.ElementClickInterceptedException e) {
+                if (attempt >= 3) {
+                    ((JavascriptExecutor) driver).executeScript("arguments[0].focus();", input);
+                    break;
+                }
+                utils.PageReady.waitSettled(driver);
+                utils.SmoothScroll.to(driver, input);
+            }
+        }
         // no Ctrl+A here: in a date box it selects the whole PAGE (seen as a page full of highlighted text). The digits simply replace the parts of the date.
         input.sendKeys(keys(driver, date));
         if (!date.toString().equals(input.getAttribute("value"))) {

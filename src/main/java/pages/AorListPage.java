@@ -75,6 +75,14 @@ public class AorListPage extends BasePage {
         spec.opener.run();
         waitFor(timeout).until(d -> !TableReader.rows(d).isEmpty() || !TableReader.showing(d).isEmpty());
         settle();
+        // a CLEAN list for every scenario: the page is loaded again, so the search text, filter, sort and page of the scenario before are gone (seen: a picture of the Columns scenario
+        // showed page 41 of the list, left by an earlier sort)
+        driver.navigate().refresh();
+        waitFor(timeout).until(d -> !TableReader.rows(d).isEmpty() || !TableReader.showing(d).isEmpty());
+        settle();
+        if (startOfPage() > 1) {
+            gotoPage(1);
+        }
     }
 
     // ------------------------------------------------------------------ reading
@@ -229,17 +237,21 @@ public class AorListPage extends BasePage {
     // ------------------------------------------------------------------ paging
 
     public void pageSize(int n) {
-        new Select(visible(pageSizeSelect)).selectByVisibleText(n + " / page");
         int expected = n;
-        try {
-            // the list keeps the old rows until the new page size is loaded: wait until it shows min(n, total) rows
-            waitFor(timeout).until(d -> {
-                int total = TableReader.total(d);
-                int rows = TableReader.rows(d).size();
-                return total < 0 ? rows > 0 : rows == Math.min(expected, total);
-            });
-        } catch (org.openqa.selenium.TimeoutException keepsOld) {
-            // the check of the scenario reports what the list shows
+        // the list keeps the old rows until the new page size is loaded: wait until it shows min(n, total) rows; when it still shows the old rows the size is chosen once more (seen: one run
+        // read 35 rows after "5 / page" because the list had not changed yet)
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            new Select(visible(pageSizeSelect)).selectByVisibleText(n + " / page");
+            try {
+                waitFor(timeout).until(d -> {
+                    int total = TableReader.total(d);
+                    int rows = TableReader.rows(d).size();
+                    return total < 0 ? rows > 0 : rows == Math.min(expected, total);
+                });
+                break;
+            } catch (org.openqa.selenium.TimeoutException keepsOld) {
+                // second try, or the check of the scenario reports what the list shows
+            }
         }
         settle();
     }

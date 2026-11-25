@@ -95,24 +95,32 @@ public final class ValueChecks {
         return total() - failed();
     }
 
+    /** The check whose failure is only a matter of wording (the message is correct in substance but written in programmer language). */
+    public static final String WORDING_CHECK = "The messages are written in plain words";
+
+    /** True when something failed and EVERY failed check is the wording check: the scenario is then a PARTIAL FAIL (orange), not a FAIL. */
+    public boolean wordingOnly() {
+        return failed() > 0 && wrong().stream().allMatch(r -> r.value.startsWith(WORDING_CHECK));
+    }
+
     public List<Row> wrong() {
         return rows.stream().filter(r -> !r.ok).toList();
     }
 
-    /** "27 values checked: 25 correct, 2 wrong". */
+    /** "27 checks done: 25 passed, 2 failed". */
     public String summary() {
-        return total() + " values checked: " + passed() + " correct, " + failed() + " wrong";
+        return total() + (total() == 1 ? " check done: " : " checks done: ") + passed() + " passed, " + failed() + " failed";
     }
 
     /** One sentence for the report header: which values are wrong, and that the rest is fine. */
     public String failureText() {
         StringBuilder sb = new StringBuilder();
-        sb.append(failed()).append(" of ").append(total()).append(" values on this page are wrong (the other ").append(passed())
-                .append(" are correct). Wrong: ");
+        sb.append(failed()).append(failed() == 1 ? " check failed" : " checks failed").append(" (of ").append(total()).append("; the other ").append(passed())
+                .append(passed() == 1 ? " passed" : " passed").append("). What failed: ");
         boolean first = true;
         for (Row r : wrong()) {
-            sb.append(first ? "" : "; ").append(r.where).append(" > ").append(r.value).append(": should be \"").append(r.expected)
-                    .append("\" but the page shows \"").append(r.shown).append("\"");
+            sb.append(first ? "" : "; ").append(r.where).append(" - ").append(r.value).append(": expected \"").append(r.expected)
+                    .append("\", but it was \"").append(r.shown).append("\"");
             first = false;
         }
         return sb.toString();
@@ -125,14 +133,14 @@ public final class ValueChecks {
         }
         StringBuilder sb = new StringBuilder("<br><br><b>");
         if (failed() == 0) {
-            sb.append("<span style='color:#1b7f3b'>All ").append(total()).append(" checked values are correct.</span></b>");
+            sb.append("<span style='color:#1b7f3b'>All ").append(total()).append(total() == 1 ? " check passed.</span></b>" : " checks passed.</span></b>");
         } else {
-            sb.append("<span style='color:#c62828'>RESULT: FAILED - ").append(failed()).append(" of ").append(total())
-                    .append(" values are wrong.</span> <span style='color:#1b7f3b'>The other ").append(passed()).append(" values are correct.</span></b>");
+            sb.append("<span style='color:#c62828'>").append(failed()).append(failed() == 1 ? " check failed" : " checks failed").append(" (of ").append(total())
+                    .append(").</span> <span style='color:#1b7f3b'>The other ").append(passed()).append(" passed.</span></b>");
             sb.append("<ul style='margin:4px 0 0 18px'>");
             for (Row r : wrong()) {
-                sb.append("<li><b>").append(TestReporter.esc(r.where)).append(" &gt; ").append(TestReporter.esc(r.value)).append("</b>: should be &ldquo;")
-                        .append(TestReporter.esc(SecretMasker.mask(r.expected))).append("&rdquo; but the page shows <span style='color:#c62828'><b>&ldquo;")
+                sb.append("<li><b>").append(TestReporter.esc(r.where)).append(" &gt; ").append(TestReporter.esc(r.value)).append("</b>: expected &ldquo;")
+                        .append(TestReporter.esc(SecretMasker.mask(r.expected))).append("&rdquo;, but it was <span style='color:#c62828'><b>&ldquo;")
                         .append(TestReporter.esc(SecretMasker.mask(r.shown))).append("&rdquo;</b></span></li>");
             }
             sb.append("</ul>");

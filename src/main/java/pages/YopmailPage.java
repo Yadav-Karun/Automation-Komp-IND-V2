@@ -71,7 +71,10 @@ public class YopmailPage extends BasePage {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            click(refresh);
+            // the inbox is reloaded by the BROWSER (as a person presses F5), not with the refresh button of Yopmail (user, 2026-11-17: the button is what makes Yopmail ask "Please confirm
+            // you're human"). Nothing is bypassed: when Yopmail still asks, EorMailbox waits for a person to click the check.
+            driver.navigate().refresh();
+            waitFor(timeout).until(d -> !d.findElements(inboxFrame).isEmpty());
         }
     }
 

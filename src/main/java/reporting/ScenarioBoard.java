@@ -22,8 +22,12 @@ public final class ScenarioBoard {
     public enum Verdict {
         PASS("PASS", "#2e7d32", Status.PASS),
         FAIL("FAIL", "#c62828", Status.FAIL),
+        /** Only the WORDING of the application's messages is a problem (programmer text instead of a plain sentence): orange, not red (user, 2026-11-14). */
+        PARTIAL_FAIL("PARTIAL FAIL", "#ef6c00", Status.WARNING),
+        /** The scenario shows a problem that is already reported (a Jira ticket) or waits for a decision: blue, shown with the ticket number instead of FAIL (user, 2026-11-17). */
+        KNOWN_DEFECT("KNOWN ISSUE", "#1565c0", Status.INFO),
         NOT_RUN("NOT RUN", "#757575", Status.SKIP),
-        BLOCKED("BLOCKED", "#ef6c00", Status.WARNING),
+        BLOCKED("BLOCKED", "#6d4c41", Status.SKIP),
         NOT_JUDGED("NOT JUDGED", "#757575", Status.SKIP);
 
         public final String label;
@@ -188,7 +192,7 @@ public final class ScenarioBoard {
             if (o.kind == Kind.AUTOMATION_FAILURE) {
                 automation++;
             }
-            if (o.verdict == Verdict.FAIL) {
+            if (o.verdict == Verdict.FAIL || o.verdict == Verdict.PARTIAL_FAIL) {
                 if (o.defectRefs.isEmpty()) {
                     unreferenced++;
                 }
@@ -272,6 +276,8 @@ public final class ScenarioBoard {
         return switch (v) {
             case PASS -> "Scenario executed and the expected behaviour was observed";
             case FAIL -> "Scenario exposed a confirmed application defect";
+            case KNOWN_DEFECT -> "The problem is already reported (Jira ticket) or waits for a decision: shown with the ticket number, not counted as a new failure";
+            case PARTIAL_FAIL -> "Scenario is correct except that the application's messages are worded in programmer language (orange: only the wording is wrong)";
             case NOT_RUN -> "Scenario was not executed";
             case BLOCKED -> "Execution could not continue because of a missing prerequisite";
             case NOT_JUDGED -> "Not enough evidence to decide (the application did not reach the checked stage, or the test could not carry it out)";

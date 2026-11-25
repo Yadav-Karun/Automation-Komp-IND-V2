@@ -172,6 +172,20 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
             });
             fileScenario("W04", "A text file (.txt) instead of a workbook", () -> AorWorkbooks.writePlainText(scratch("employees.txt"), "Name,State\nA,B"));
             step("W05", "Upload clicked without choosing a file", "The application should not accept it and should say that a file is needed", () -> judgeNoEmployee(uploadBulkWithoutFile()));
+            step("W06", "A workbook whose row is refused is not shown as a success (no green tick, no \"Done\")", "The window shows that the upload failed: no green tick and no \"Done\" when nothing was created", () -> {
+                AorDataGenerator.bookPairs = false; // the row cannot become an employee
+                AorRun one;
+                try {
+                    one = AorDataGenerator.newRun(1);
+                } finally {
+                    AorDataGenerator.bookPairs = true;
+                }
+                AorWorkbooks.writeEmployeeWorkbookWith(one, bulkFile(), List.of(a("contact number", "abcdefghij")));
+                AorDialog.Answer a = uploadBulk(bulkFile());
+                String text = judgeNoEmployee(a);
+                successSignOnFailure(a, "a workbook whose only row is refused");
+                return text;
+            });
 
             // ---- rows with several wrong values; every row also has an empty Delivery Partner Id, which the application refuses, so no row can create an employee
             batch("U1", "Every required value left empty (one row)", List.of(
@@ -189,15 +203,13 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
             // of such a row and refuses it), so no row can create an employee, and a value the application does not report was accepted.
             batch("G1", "Contact number: letters, mixed, spaces, country codes, wrong lengths, symbols, blank (12 rows)", variants("contact number",
                     "abcdefghij", "98a7654321", "98765 43210", "+919876543210", "919876543210", "0123456789", "987654321", "98765432101", "+91-98765", "   ", "@@@@@@@@@@", null));
-            batch("G2", "Aadhaar number: wrong lengths, letters, symbols, spaces, leading digits, zeros, blank (11 rows)", List.of(
+            batch("G2", "Aadhaar number: wrong lengths, letters, symbols, leading zero, zeros, blank (9 rows)", List.of(
                     spec("11 digits", x -> a("aadhar number", x.aadhaar.substring(0, 11))),
                     spec("13 digits", x -> a("aadhar number", x.aadhaar + "1")),
                     spec("letters", x -> a("aadhar number", "ABCDEFGHIJKL")),
                     spec("digits with a letter", x -> a("aadhar number", x.aadhaar.substring(0, 11) + "A")),
                     spec("symbols between digits", x -> a("aadhar number", "8679-4271-784")),
-                    spec("spaces between digits", x -> a("aadhar number", "8679 4271 7842")),
                     spec("starts with 0", x -> a("aadhar number", "067942717842")),
-                    spec("starts with 1", x -> a("aadhar number", "167942717842")),
                     spec("all zeros", x -> a("aadhar number", "000000000000")),
                     spec("only spaces", x -> a("aadhar number", "   ")),
                     spec("blank", x -> a("aadhar number", null))));
@@ -281,7 +293,6 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
             batch("T11", "E-mail address: every wrong form (15 rows)", variants("personal email id", EMAIL_ODD));
             batch("T12", "IFSC code: wrong case, length, fifth character, symbols, wide letters (11 rows)", variants("ifsc code", IFSC_ODD));
             batch("T13", "PAN number: right pattern but impossible content, wide letters, accents (8 rows)", variants("pan number", PAN_ODD));
-            batch("T14", "Aadhaar number: twelve digits that are no real Aadhaar number (6 rows)", variants("aadhar number", AADHAAR_ODD));
             batch("T15", "Text lengths far over any limit: name, father name, bank name, hub location, address (8 rows)", List.of(
                     spec("name of 256 characters", x -> a("name", "N".repeat(256))),
                     spec("name of 1000 characters", x -> a("name", "N".repeat(1000))),
@@ -328,6 +339,10 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
             single("V04", "E-mail address with a plus sign (a+b@yopmail.com)", "", x -> m("personal email id", "plus.test+" + x.deliveryPartnerId.replace("-", "").toLowerCase(Locale.ROOT) + "@yopmail.com"), true);
             single("V05", "E-mail address in capital letters", "", x -> m("personal email id", ("CAPS" + x.deliveryPartnerId.replace("-", "") + "@YOPMAIL.COM")), true);
             single("V06", "Name of two letters", "", x -> m("name", "Jo", "name as per company", "Jo", "dp name as per company", "Jo"), true);
+            pointsOverride = List.of("We upload one employee whose Aadhaar number is typed with spaces between the digits (4 + 4 + 4).",
+                    "If the application refuses it, that is fine. If it accepts it, we open the employee and look at how the number is stored.",
+                    "A good application stores it without spaces; stored with the spaces is a problem.");
+            step("V07", "Aadhaar number typed with spaces: refused, or stored without the spaces", "Refused, or stored as 12 digits without spaces; stored with the spaces is a problem", this::aadhaarWithSpaces);
 
             // ---- structure of the workbook: every required column missing (one scenario each), a duplicate heading, no heading row
             for (String col : concat(List.of("client name", "project name"), REQUIRED)) {
@@ -631,7 +646,6 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     private static final String[] IFSC_ODD = {"sbin0001234", "SBIN1001234", "SBIN000123", "SBIN00012345", "SBIN0001 234", "SBIN000123$", "1234SBIN000", "0000SBIN123", "S".repeat(30), "SBIN0",
             "\uFF33\uFF22\uFF29\uFF2E0001234"};
     private static final String[] PAN_ODD = {"ABCZE1234F", "ABCXE1234F", "ABCDE0000F", "ABCDE12345", "1BCDE1234F", "ABCD11234F", "\uFF21\uFF22\uFF23\uFF24\uFF25" + "1234F", "ABC\u00C9E1234F"};
-    private static final String[] AADHAAR_ODD = {"111111111111", "123456789012", "999999999999", "200000000000", "222222222222", "987654321098"};
     private static final String[] FHRID_ODD = {"dpa-000000", "DPA", "  ", "DPA-" + "0".repeat(40), "!@#$%^", "<script>alert(1)</script>", "=1+1", "0", "-1", "DPA 12 34"};
     private static final String[] PAYOUT_ODD = {"1,000", "\u20B9500", "0.001", "99999999999999999999", "\u0665\u0660\u0660", "=1+1", "TRUE", "0x1F", "NaN", "Infinity", "500 INR"};
 
@@ -655,6 +669,8 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
 
     /** One row, valid except one value. {@code shouldBeAccepted}: the value is valid at its edge, so the row must be created. */
     private void single(String id, String title, String alias, Function<AorEmployee, Map<String, String>> change, boolean shouldBeAccepted) {
+        pointsOverride = List.of("We upload one employee row that is correct except for this: " + title + ".",
+                shouldBeAccepted ? "This value is allowed, so a good application accepts the employee." : "A good application refuses the row and says clearly what is wrong.");
         step(id, title, shouldBeAccepted ? "The application accepts the employee" : "The application refuses the row, creates nobody and names the wrong value", () -> {
             if (ESTABLISHED.contains(id) && "true".equalsIgnoreCase(ConfigManager.get("aor.edge.skip.established"))) {
                 throw new SkipException("Not repeated on request (-Daor.edge.skip.established=true): this scenario was run on 2026-11-11 (report reports/AorBulkUploadAndPayeeSheetEdgeCases/2026-11-11_12.10.32) and the application ACCEPTED the row.");
@@ -734,6 +750,39 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
         rep.evidence("profile_" + (++shots), "The profile of the employee found by \"" + searchText + "\"");
         agents.backToList();
         return out;
+    }
+
+    /**
+     * V07: an Aadhaar number typed with spaces (1234 5678 9012). The application may refuse it (fine) or accept it; when it accepts, the employee's profile shows how it was stored:
+     * as 12 digits (cleaned up: fine) or with the spaces (a problem). The real validity of the number is not judged (user, 2026-11-14).
+     */
+    private String aadhaarWithSpaces() {
+        needLimit("V07", 1);
+        AorRun one = AorDataGenerator.newRun(1);
+        AorEmployee e = one.employees.get(0);
+        String spaced = e.aadhaar.substring(0, 4) + " " + e.aadhaar.substring(4, 8) + " " + e.aadhaar.substring(8);
+        Map<String, String> change = m("aadhar number", spaced);
+        AorWorkbooks.writeEmployeeWorkbookWith(one, bulkFile(), List.of(change));
+        AorDialog.Answer a = uploadBulk(bulkFile());
+        int created = Math.max(0, AorDialog.numberBefore(a.everything(), "created", "added", "inserted", "onboarded"));
+        if (created == 0) {
+            return "The application refused the Aadhaar number typed with spaces (\"" + spaced + "\"): nothing was stored, so nothing is wrong. " + a.describe();
+        }
+        book(e, change, "accepted");
+        String who = "The employee created for this check is \"" + e.name + "\" (delivery partner id " + e.deliveryPartnerId + ")";
+        Map<String, String> profile = captureProfile(e.deliveryPartnerId);
+        if (profile == null) {
+            profile = captureProfile(e.name);
+        }
+        String stored = profile == null ? null : profile.get("Identification Information > AADHAAR NUMBER");
+        if (stored == null || stored.equals("(not shown)")) {
+            throw new AssertionError(who + ", but the Aadhaar number could not be read on its profile (Identification Information).");
+        }
+        if (stored.contains(" ")) {
+            rep.defect("The application stores an Aadhaar number with the spaces that were typed", "Refused, or stored as 12 digits without spaces",
+                    who + ". Typed: \"" + spaced + "\". The profile shows: \"" + stored + "\".");
+        }
+        return who + ". Typed: \"" + spaced + "\". The profile shows: \"" + stored + "\"" + (stored.contains(" ") ? " (stored with the spaces)." : " (stored without the spaces: fine).");
     }
 
     /** I00: what the application holds now for the first base employee compared with the data that was uploaded for him / her. */
@@ -919,6 +968,8 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
 
     /** A valid row in a workbook whose columns were changed. */
     private void columnScenario(String id, String title, String alias, java.util.function.Consumer<Path> change, boolean shouldBeRefused) {
+        pointsOverride = List.of("We change the columns of an otherwise correct employee sheet: " + title + ".",
+                shouldBeRefused ? "A good application refuses the sheet and names the column." : "A good application accepts the employee or says clearly what it does with the extra column.");
         step(id, title, shouldBeRefused ? "The application refuses the file, creates nobody and names the column" : "The application accepts the employee or says clearly what it does with the extra column", () -> {
             needLimit(id, 1);
             AorRun one = AorDataGenerator.newRun(1);
@@ -981,6 +1032,8 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
 
     /** Two rows of one file that repeat one column of the first row in the second: at most the first employee may be created, the second row must be refused with a message. */
     private void sameFileColumn(String id, String title, String column, Function<AorEmployee, String> value) {
+        pointsOverride = List.of("We upload one file with two employees: " + title.replaceFirst("^Two rows of one file with ", "the second repeats ") + " of the first.",
+                "A good application accepts the first employee and refuses the second with a clear message.");
         step(id, title, "At most the first employee is created; the second row is refused with a message", () -> {
             needLimit(id, 2);
             AorRun two = AorDataGenerator.newRun(2);
@@ -1088,6 +1141,17 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
                 return payFile();
             });
 
+            step("W04", "A refused Payee Sheet is not shown as a success (no green tick, no \"Done\", no \"Success 1/1\")", "The window shows that the sheet failed: no success sign when no payroll entry was created", () -> {
+                if (sessions >= sessionLimit) {
+                    throw new SkipException("Not run: the limit of " + sessionLimit + " payroll sessions is reached.");
+                }
+                AorWorkbooks.writePayeeWorkbookWith(view(run, 1), payFile(), List.of(m("fhrid", "DPA-000000")), List.of());
+                LocalDate d = LocalDate.now();
+                AorDialog.Answer a = uploadPayee(payFile(), "Bleach", "The Substitute Shinigami", d, d);
+                String text = judgePayee(a);
+                successSignOnFailure(a, "a Payee Sheet whose only row names an employee that is not onboarded");
+                return text;
+            });
             payeeRow("Q01", "FHRID of an employee that is not onboarded", m("fhrid", "DPA-000000"));
             payeeRow("Q02", "FHRID left empty", m("fhrid", null));
             payeeRow("Q07", "Final payout left empty", m("final payout", null));
@@ -1218,6 +1282,8 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     private boolean tcSelected = true;
     /** The "test data" of the entry that starts next (a batch lists the values it tries). */
     private String detailOverride;
+    /** The description (points) of the entry that starts next: set by the helper that defines the scenario. */
+    private List<String> pointsOverride;
 
     /** The steps to reproduce a scenario, in plain words (shown at the top of its entry). */
     private List<String> stepsFor(String tcId, String id, String title) {
@@ -1231,6 +1297,9 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
                 return List.of("Collect the rows of the employees that are onboarded", "Write them into the edge workbook in the folder of the QA owner");
             case "I00":
                 return List.of("Sign in as the AOR user", "Open Employees > AOR and search the first base employee", "Open the profile and compare every value with the uploaded workbook");
+            case "V07":
+                return List.of("Sign in as the AOR user", "Upload one employee whose Aadhaar number is typed with spaces between the digits",
+                        "If the application accepts the employee, open the profile and look at Identification Information", "Compare the Aadhaar number shown there with what was typed");
             case "I01":
                 return List.of("Open the profile of an existing employee and note every value", "Upload a workbook with a new row that repeats this employee's company employee id",
                         "Open the profile again and compare it with the notes");
@@ -1316,6 +1385,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
         if (planning) {
             plannedLabels.add(tc + " | " + id + " | " + title);
             detailOverride = null;
+            pointsOverride = null;
             return true;
         }
         boolean chosen = selected(id);
@@ -1333,7 +1403,9 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
                 expected, driver, holder(), this::headline);
         r.captureFullApi();
         r.steps(stepsFor(tc, id, title));
+        r.describe(pointsOverride != null ? pointsOverride : List.of(title + "."));
         detailOverride = null;
+        pointsOverride = null;
         rep = r;
         Throwable error = null;
         SkipException skip = null;
@@ -1360,10 +1432,11 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
             kind = ScenarioBoard.Kind.AUTOMATION_FAILURE;
             reason = "The test could not carry this scenario out (an automation failure, not an application defect): " + PlainText.oneLine(PlainText.assertion(String.valueOf(error.getMessage())), 300);
         } else if (found > 0) {
-            v = ScenarioBoard.Verdict.FAIL;
+            boolean wording = r.onlyWording(); // only the wording of the messages is a problem: orange, not red
+            v = wording ? ScenarioBoard.Verdict.PARTIAL_FAIL : ScenarioBoard.Verdict.FAIL;
             kind = ScenarioBoard.Kind.APPLICATION_DEFECT;
-            refs = refsFor(tc, id);
-            reason = found + (found == 1 ? " problem" : " problems") + " found in the application (see the steps below).";
+            refs = wording ? List.of("AOR-D09") : refsFor(tc, id);
+            reason = wording ? "Only the wording of the application's messages is a problem (see the steps below)." : found + (found == 1 ? " problem" : " problems") + " found in the application (see the steps below).";
         } else if (notJudged) {
             v = ScenarioBoard.Verdict.NOT_JUDGED;
             reason = "The application stopped at an earlier problem of every row, so the values of this scenario were not judged.";
@@ -1422,7 +1495,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
         if (tc.endsWith("01")) {
             switch (id) {
                 case "S00": case "B00": return List.of("Set-up");
-                case "W01": case "W02": case "W03": case "W04": case "W05": return List.of("Unusable Files");
+                case "W01": case "W02": case "W03": case "W04": case "W05": case "W06": return List.of("Unusable Files");
                 case "X00": return List.of("Diagnostics");
                 case "U1": case "G6": return List.of("Required Values");
                 case "G1": case "G2": case "G3": case "G4": case "G5": case "G7": case "G8": case "S11": return List.of("Wrong Formats");
@@ -1435,6 +1508,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
                 case "M02": case "U6": return List.of("Multiple Rows", "Duplicates");
                 case "K01": case "K02": case "K03": return List.of("Column Validation");
                 case "V01": case "V02": return List.of("Valid Edge Values");
+                case "V07": return List.of("Wrong Formats", "Data Integrity");
                 case "R00": return List.of("Retention");
                 default:
                     if (id.startsWith("HM-") || id.startsWith("H")) {
@@ -1458,7 +1532,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
         switch (id) {
             case "S00": case "B01": return List.of("Set-up");
             case "P01": case "P02": case "P03": case "P04": case "P05": return List.of("Payee Sheet Window Checks");
-            case "W01": case "W02": case "W03": return List.of("Unusable Files");
+            case "W01": case "W02": case "W03": case "W04": return List.of("Unusable Files");
             case "Q00": return List.of("Valid Baseline");
             case "R00": return List.of("Retention");
             default: return List.of("Payee Sheet Row Checks");
@@ -1478,11 +1552,15 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
         ScenarioBoard.defect("AOR-D08", "Medium", "The Payee Sheet accepts a decimal payout (1234.567)", "");
         ScenarioBoard.defect("AOR-D09", "Low", "Messages show developer text instead of plain words", "For example \"Input should be a valid string\" and the PAN / Aadhaar verification error with an internal class name.");
         ScenarioBoard.defect("AOR-D11", "High", "The client and the project of a row are not checked", "A row without a client, with an unknown client or with a project that does not belong to the client is accepted (to be confirmed by the run).");
+        ScenarioBoard.defect("AOR-D12", "Medium", "A refused upload is shown as a success", "The upload window shows a green tick and \"Done\" although every row was refused and nothing was created; the Payee Sheet window also says \"Files - Success: 1/1, Failed: 0/1\".");
+        ScenarioBoard.defect("AOR-D13", "Low", "An Aadhaar number typed with spaces is stored with the spaces", "The profile shows the number the way it was typed (4 + 4 + 4 with spaces) instead of 12 digits.");
         ScenarioBoard.defect("AOR-D10", "Low", "A missing or renamed column is reported as an empty value", "\"Name: Input should be a valid string\" instead of saying that the column is missing.");
     }
 
     private static List<String> refsFor(String tc, String id) {
         switch (id) {
+            case "W06": case "W04": return List.of("AOR-D12");
+            case "V07": return List.of("AOR-D13");
             case "U1": return List.of("AOR-D06", "AOR-D09");
             case "G1": case "G2": case "G4": case "G5": case "G7": case "G8": case "S11": return List.of("AOR-D05");
             case "G3": return List.of("AOR-D05", "AOR-D09");
@@ -1631,6 +1709,10 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     }
 
     private void batch(String id, String title, List<Spec> specs) {
+        String topic = title.contains(": ") ? title.substring(0, title.indexOf(": ")) : title;
+        pointsOverride = List.of("We upload an employee sheet with " + specs.size() + " rows.",
+                "Every row has a different wrong value for: " + topic + " (for example " + String.join("; ", specs.stream().limit(3).map(s -> s.title).toList()) + (specs.size() > 3 ? "; ..." : "") + ").",
+                "A good application refuses every row and says clearly what is wrong.");
         detailOverride = "Values tried, one row each: " + String.join("; ", specs.stream().map(s -> s.title).toList()) + ".";
         stepChecks(id, headingOf(title), "The application refuses every row, creates nobody, names each wrong column and explains it in plain words", c -> {
             AorDataGenerator.bookPairs = false; // rows that cannot become employees do not use up Aadhaar / PAN pairs
@@ -1668,8 +1750,8 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
                 boolean checked = valuesWereChecked(rowIssues);
                 if (rowIssues != null) {
                     boolean technical = rowIssues.stream().anyMatch(t -> TECHNICAL.matcher(t).find());
-                    c.check(where, "The messages are written in plain words", !technical, "a message that a user can understand",
-                            technical ? "developer text such as \"" + shorten(rowIssues.stream().filter(t -> TECHNICAL.matcher(t).find()).findFirst().orElse("")) + "\"" : "plain words");
+                    c.check(where, "The messages are written in plain words", !technical, "a clear sentence that tells the user what is wrong",
+                            technical ? "the application says \"" + shorten(rowIssues.stream().filter(t -> TECHNICAL.matcher(t).find()).findFirst().orElse("")) + "\", which is programmer wording and does not say what to do" : "plain words");
                 }
                 for (Map.Entry<String, String> col : overrides.get(i).entrySet()) {
                     String key = col.getKey();
@@ -1717,6 +1799,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     }
 
     private void fileScenario(String id, String title, java.util.concurrent.Callable<Path> writer) {
+        pointsOverride = List.of("We upload a file that cannot be used: " + title + ".", "A good application refuses it and says that the file cannot be used.");
         step(id, title, "The application should refuse the file, create nobody and say that the file cannot be used", () -> {
             Path file = writer.call();
             return judgeNoEmployee(uploadBulk(file));
@@ -1724,6 +1807,29 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     }
 
     // ---- judging what the application answered
+
+    /**
+     * A refused upload must not look like a success. The upload window of the application shows a green tick and the word "Done" when it has finished, also when every row was
+     * refused ("No valid data found to upload. Done  Errors (14)"); the Payee Sheet window adds "Files - Success: 1/1, Failed: 0/1" although no row was accepted.
+     */
+    private void successSignOnFailure(AorDialog.Answer a, String what) {
+        String all = a.everything();
+        int created = Math.max(0, AorDialog.numberBefore(all, "created", "added", "inserted", "onboarded"));
+        int updated = Math.max(0, AorDialog.numberBefore(all, "updated"));
+        boolean nothingHappened = created == 0 && updated == 0;
+        boolean problemShown = AorDialog.tellsOfProblem(all) || all.toLowerCase(Locale.ROOT).contains("error");
+        if (!nothingHappened || !problemShown) {
+            return;
+        }
+        boolean tick = all.contains("\u2705") || all.contains("\u2714") || Pattern.compile("\\bDone\\b").matcher(all).find();
+        java.util.regex.Matcher files = Pattern.compile("(?i)success:\\s*(\\d+)\\s*/\\s*(\\d+).*?failed:\\s*0\\s*/").matcher(all);
+        boolean allFilesOk = files.find() && !"0".equals(files.group(1));
+        if (tick || allFilesOk) {
+            rep.defect("The upload window shows a success sign although the upload failed", "When every row is refused and nothing is created, the window shows a failure (no green tick, no \"Done\", no \"Success 1/1\")",
+                    "For " + what + " the application created nothing and listed errors, but the window shows " + (tick ? "a green tick / \"Done\"" : "") + (tick && allFilesOk ? " and " : "")
+                            + (allFilesOk ? "\"Files - Success: " + files.group(1) + "/" + files.group(2) + ", Failed: 0\"" : "") + ". " + a.describe());
+        }
+    }
 
     /** A file / window that should create no employee. */
     private String judgeNoEmployee(AorDialog.Answer a) {
@@ -1750,8 +1856,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
         rep.addFile("Uploaded workbook", "uploads/" + file.getFileName());
         AorDialog.Answer a = agents.clickUploadAndWait(300);
         countImpact(a);
-        rep.evidence("bulk_" + shots + "_answer", "What the application answered");
-        agents.dialog().dismiss();
+        // the window with the answer stays open: the picture of the step shows the ANSWER; the next step closes it (user, 2026-11-17: the pictures must show the result of the action)
         return a;
     }
 
@@ -1813,6 +1918,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     // ---- Payee Sheet window
 
     private void payeeFile(String id, String title, java.util.concurrent.Callable<Path> writer) {
+        pointsOverride = List.of("We upload a Payee Sheet (the payout list) that cannot be used: " + title + ".", "A good application refuses it and says that the file cannot be used.");
         step(id, title, "The application should refuse the file, create no payroll entry and say that the file cannot be used", () -> {
             Path file = writer.call();
             LocalDate d = LocalDate.now();
@@ -1831,6 +1937,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
     }
 
     private void payeeRow(String id, String title, Map<String, String> change) {
+        pointsOverride = List.of("We upload a Payee Sheet (the payout list) that is correct except for this: " + title + ".", "A good application refuses the row and says clearly what is wrong.");
         step(id, title, "The application should refuse the row, create no payroll entry and say what is wrong", () -> {
             if (sessions >= sessionLimit) {
                 throw new SkipException("Not run: the limit of " + sessionLimit + " payroll sessions is reached.");
@@ -1881,8 +1988,7 @@ public class AorBulkUploadAndPayeeSheetEdgeCases extends BaseTest {
             a.windowText = "The Upload button cannot be clicked with these choices (the application refuses it by keeping the button off).";
         }
         countImpact(a);
-        rep.evidence("pay_" + shots + "_answer", "What the application answered");
-        d.dismiss();
+        // the window with the answer stays open: the picture of the step shows the ANSWER; the next step closes it
         return a;
     }
 

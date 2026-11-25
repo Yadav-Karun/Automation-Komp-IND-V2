@@ -113,6 +113,7 @@ public final class ScreenshotManager {
             return null;
         }
         try {
+            utils.PageReady.waitSettled(driver); // the picture is taken when the action is complete and the page has finished loading (user, 2026-11-17)
             byte[] png = capturePng(driver);
             Path target = ExecutionInfo.screenshots().resolve(fileName);
             Files.write(target, png);

@@ -35,8 +35,8 @@ public class ProjectsPage extends BasePage {
 
     /** The data rows of the table: header (upper case) -> cell text, read in ONE script call (no stale elements, fast). */
     private static final String ROWS_JS = "const h=Array.from(document.querySelectorAll('thead th')).map(t=>(t.innerText||'').trim().toUpperCase());"
-            + "return Array.from(document.querySelectorAll('tbody tr')).filter(r=>r.cells.length>=5).map(r=>{const o={};"
-            + "Array.from(r.cells).forEach((c,i)=>{o[h[i]||('COLUMN '+(i+1))]=(c.innerText||'').replace(/\\s+/g,' ').trim();});return o;});";
+            + "return JSON.stringify(Array.from(document.querySelectorAll('tbody tr')).filter(r=>r.cells.length>=5).map(r=>{const o={};"
+            + "Array.from(r.cells).forEach((c,i)=>{o[h[i]||('COLUMN '+(i+1))]=(c.innerText||'').replace(/\\s+/g,' ').trim();});return o;}));";
     /** What the table shows right now: the "Showing" text and the first cell of every row (a change of page / tab / filter / sort changes it). */
     private static final String STATE_JS = "const s=(document.body.innerText.match(/Showing[^\\n]*/)||[''])[0];"
             + "return s+'|'+Array.from(document.querySelectorAll('tbody tr')).map(r=>r.cells[0]?r.cells[0].innerText:'').join('~')"
@@ -133,12 +133,7 @@ public class ProjectsPage extends BasePage {
     @SuppressWarnings("unchecked")
     public List<Map<String, String>> rows() {
         Object o = ((JavascriptExecutor) driver).executeScript(ROWS_JS);
-        List<Map<String, String>> out = new ArrayList<>();
-        if (o instanceof List) {
-            for (Object r : (List<Object>) o) {
-                out.add(new LinkedHashMap<>((Map<String, String>) r));
-            }
-        }
+        List<Map<String, String>> out = new ArrayList<>(utils.TableReader.parse(o));
         return out;
     }
 
