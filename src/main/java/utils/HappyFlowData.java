@@ -164,6 +164,51 @@ public class HappyFlowData {
         return e;
     }
 
+    // ------------------------------------------------------------------ the edit case: a new value of the same kind (a name for a name, a number for a number)
+
+    private static final String[] SKILLS = {"Python, Postman, Jira", "C#, Playwright, Azure", "JavaScript, Cypress, Docker", "Kotlin, Appium, Jenkins"};
+    private static final String[] SECOND_SKILLS = {"Linux, Agile, Excel", "Scrum, Confluence, Power BI", "Kubernetes, Grafana, Bash"};
+    private static final String[] TASKS = {"Planned the work of the team and reported the progress every week.", "Prepared the monthly reports and checked them with the manager.",
+            "Handled customer questions and kept the records up to date."};
+
+    /**
+     * A NEW valid value for a text field of the profile, chosen by its label (a person's name for a name, an address for an address ...), or null when the label is not known
+     * (the caller then changes the old value a little). Numbers are not handled here: they are counted up by the caller.
+     */
+    public static String different(String label, String old) {
+        String l = label.toLowerCase(Locale.ROOT).trim();
+        String o = old == null ? "" : old.trim();
+        for (int attempt = 0; attempt < 6; attempt++) {
+            String v = switch (l) {
+                case "first name", "middle name" -> pick(random.nextBoolean() ? MALE : FEMALE);
+                case "last name" -> faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "father name", "spouse name" -> pick(MALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "mother name" -> pick(FEMALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "name", "account holder name" -> pick(random.nextBoolean() ? MALE : FEMALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "address", "bank address" -> faker.address().streetAddress().replaceAll("[^a-zA-Z0-9 ,]", "");
+                case "branch name" -> pick(new String[] {"Main", "City", "Central", "Market"}) + " Branch";
+                case "bank name" -> pick(BANKS);
+                case "institution name", "university name" -> pick(INSTITUTES);
+                case "field of study" -> pick(COURSES);
+                case "certificate name" -> pick(CERTIFICATES);
+                case "previous employer", "end client id" -> faker.company().name().replaceAll("[^a-zA-Z ]", "");
+                case "designation" -> pick(DEPARTMENTS.get(pick(DEPARTMENTS.keySet().toArray(new String[0]))));
+                case "reporting manager" -> (pick(MALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "")).toUpperCase(Locale.ROOT);
+                case "key responsibilities", "job description" -> pick(TASKS);
+                case "primary skills" -> pick(SKILLS);
+                case "secondary skills" -> pick(SECOND_SKILLS);
+                default -> null;
+            };
+            if (v == null) {
+                return null;
+            }
+            if (!v.equalsIgnoreCase(o)) {
+                return v;
+            }
+        }
+        return null;
+    }
+
     private static String mobile() {
         return (6 + random.nextInt(4)) + digits(9);
     }

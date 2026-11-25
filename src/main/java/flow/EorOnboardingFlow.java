@@ -88,6 +88,24 @@ public class EorOnboardingFlow {
         this.restart = restart;
     }
 
+    /** How long (seconds) the profile may take to show a value that was just submitted (the old flow waits 8 seconds, the happy flow 60). */
+    private int verifySeconds = 8;
+    /** true: a text field gets a new value of its own kind (a name for a name) instead of the old value with a suffix. */
+    private boolean fieldAwareEdits;
+
+    public void setVerifySeconds(int seconds) {
+        this.verifySeconds = seconds;
+    }
+
+    public void setFieldAwareEdits(boolean on) {
+        this.fieldAwareEdits = on;
+    }
+
+    /** The mails of the employees are read from the QA Gmail mailbox (IMAP), whatever -Dmail.provider says. */
+    public void useImapMailbox() {
+        this.mailbox = new ImapMailbox(driver);
+    }
+
     /**
      * Runs a step that signs in. "Too many sign-in attempts" is not waited out: the browser is closed, a new one is opened and the step is run again (up to 3 times).
      */
@@ -370,11 +388,72 @@ public class EorOnboardingFlow {
 
     /** Employees > EOR, search the e-mail, eye button: the profile of the employee is open. */
     public void openEmployeeProfile(EorEmployee e) {
+        searchEmployee(e);
+        openProfileFromList(e);
+    }
+
+    /** Employees > EOR: the e-mail is searched and the list shows the row of the employee. */
+    public String searchEmployee(EorEmployee e) {
         employees.open();
         List<Map<String, String>> rows = employees.search(e.email);
         Assert.assertFalse(rows.isEmpty(), "The list of employees does not show " + e.email + " after the search.");
+        return "Employees > EOR: the search for " + e.email + " shows the row of " + e.fullName() + ".";
+    }
+
+    /** The eye button (Action > View) of the row opens the profile; its values are still hidden. */
+    public String openProfileFromList(EorEmployee e) {
         employees.openProfile(e.email);
         Assert.assertTrue(profile.isOpen(), "The profile of " + e.fullName() + " did not open after the eye button was clicked.");
+        return "The profile of " + e.fullName() + " is open.";
+    }
+
+    private boolean listShowsChanges(EorEmployee e, Map<String, String> r) {
+        String manager = run.sheet.getOrDefault("manager name", "");
+        return EorProfileChecks.norm(TableReader.column(r, "EMPLOYEE")).contains(EorProfileChecks.norm(e.fullName()))
+                && EorProfileChecks.norm(TableReader.column(r, "DESIGNATION")).equals(EorProfileChecks.norm(e.designation))
+                && (manager.isBlank() || EorProfileChecks.norm(TableReader.column(r, "REPORTING MANAGER")).equals(EorProfileChecks.norm(manager)));
+    }
+
+    /** The row of the employee in Employees &gt; EOR after the changes: name and designation as changed, code, client, project, manager, country, status. */
+    public void verifyEmployeeListing(EorEmployee e, ValueChecks c) {
+        employees.open();
+        List<Map<String, String>> rows = employees.search(e.email);
+        // the list may show the changes a little later than the profile: it is loaded again for at most verifySeconds seconds (same rule as the profile), then what it shows is judged
+        long end = System.currentTimeMillis() + verifySeconds * 1000L;
+        while (System.currentTimeMillis() < end && !(rows.size() == 1 && listShowsChanges(e, rows.get(0)))) {
+            try {
+                Thread.sleep(5000); // documented: the list is filled from the profile a moment later
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            driver.navigate().refresh();
+            employees.open();
+            rows = employees.search(e.email);
+        }
+        String w = "Employees > EOR list";
+        c.check(w, "The employee is found by the e-mail", rows.size() == 1, "one row", rows.size() + " row(s)");
+        if (rows.isEmpty()) {
+            return;
+        }
+        Map<String, String> r = rows.get(0);
+        String who = TableReader.column(r, "EMPLOYEE");
+        c.check(w, "Employee name (as changed)", EorProfileChecks.norm(who).contains(EorProfileChecks.norm(e.fullName())), e.fullName(), who);
+        c.check(w, "E-mail", who.toLowerCase(Locale.ROOT).contains(e.email.toLowerCase(Locale.ROOT)), e.email, who);
+        if (!e.employeeCode.isEmpty()) {
+            EorProfileChecks.eq(c, w, "Employee code", e.employeeCode, TableReader.column(r, "EMPLOYEE CODE"));
+        }
+        EorProfileChecks.eq(c, w, "Client", run.client, TableReader.column(r, "CLIENT"));
+        EorProfileChecks.eq(c, w, "Project", run.project, TableReader.column(r, "PROJECT"));
+        EorProfileChecks.eq(c, w, "Designation (as changed)", e.designation, TableReader.column(r, "DESIGNATION"));
+        String manager = run.sheet.getOrDefault("manager name", "");
+        if (!manager.isBlank()) {
+            EorProfileChecks.eq(c, w, "Reporting manager (as changed)", manager, TableReader.column(r, "REPORTING MANAGER"));
+        }
+        EorProfileChecks.eq(c, w, "Country", "India", TableReader.column(r, "COUNTRY"));
+        EorProfileChecks.eq(c, w, "Status", "Active", TableReader.column(r, "STATUS"));
+        if (rep != null) {
+            rep.evidence("Employees list", "The row of " + e.fullName() + " in Employees > EOR");
+        }
     }
 
     /** Every tab of the profile, after \"Unmask all\", compared with what was entered. */
@@ -421,6 +500,11 @@ public class EorOnboardingFlow {
      */
     public void verifyProfile(EorEmployee e, ValueChecks c) throws Exception {
         openEmployeeProfile(e);
+        verifyOpenProfile(e, c);
+    }
+
+    /** The same check for a profile that is already open (and still masked): every tab in turn, unmasked first, a full-page picture of each. */
+    public void verifyOpenProfile(EorEmployee e, ValueChecks c) throws Exception {
         String w = "Mask and unmask";
         c.check(w, "The button \"Unmask all\" is offered while the values are hidden", profile.unmaskOffered(), "the button \"Unmask all\"", profile.unmaskOffered() ? "offered" : "not offered");
         boolean[] first = {true};
@@ -650,7 +734,7 @@ public class EorOnboardingFlow {
                     }
                     default -> {
                         String value = key.startsWith("confirm") && accountNo != null ? accountNo
-                                : key.equals("language known") ? (f.value.trim().equalsIgnoreCase("English") ? "Hindi" : "English") : mutate(f.value, f.label);
+                                : key.equals("language known") ? (f.value.trim().equalsIgnoreCase("English") ? "Hindi" : "English") : newText(f.value, f.label);
                         profile.setText(f.label, value);
                         shown = profile.currentValue(f.label);
                         if (key.equals("account no")) {
@@ -689,16 +773,27 @@ public class EorOnboardingFlow {
             }
         }
         if (reloaded) {
-            c.check(where, "The page shows the new values right after \"Submit\"", false, "the new values are shown within 8 seconds after Submit",
+            c.check(where, "The page shows the new values right after \"Submit\"", false, "the new values are shown within " + verifySeconds + " seconds after Submit",
                     "the old values stayed on the page until it was loaded again");
         }
         c.check(where, "The application confirms the change", !message.toLowerCase(Locale.ROOT).contains("fail") && !message.toLowerCase(Locale.ROOT).contains("error"),
                 "a confirmation without an error", message.isEmpty() ? "(no message)" : "\"" + message + "\"");
     }
 
-    /** The values of the page, read again until every changed value shows its new content (at most 8 seconds). */
+    /** A new value for a text box: of its own kind (a name for a name) when the flow was asked for that, else the old value counted up / with a suffix. */
+    private String newText(String old, String label) {
+        if (fieldAwareEdits && !(old != null && old.trim().matches("[0-9]+"))) {
+            String v = utils.HappyFlowData.different(label, old);
+            if (v != null) {
+                return v;
+            }
+        }
+        return mutate(old, label);
+    }
+
+    /** The values of the page, read again until every changed value shows its new content (at most {@code verifySeconds} seconds; it stops as soon as they are all shown). */
     private List<String[]> settled(java.util.Map<EorProfilePage.Field, String> expected) {
-        long end = System.currentTimeMillis() + 8000;
+        long end = System.currentTimeMillis() + verifySeconds * 1000L;
         List<String[]> pairs = profile.pairs();
         while (!allShown(pairs, expected) && System.currentTimeMillis() < end) {
             try {
@@ -785,6 +880,15 @@ public class EorOnboardingFlow {
         }
         if (tab.equals("Professional") && block == 0 && l.equals("joining date")) {
             e.joiningDate = value;
+        }
+        if (tab.equals("Professional") && block == 0 && run != null) {
+            switch (l) { // the values of the workbook row that the list and the contract show
+                case "reporting manager" -> run.sheet.put("manager name", value);
+                case "manager email" -> run.sheet.put("manager email", value);
+                case "department" -> run.sheet.put("department", value);
+                case "emp type" -> run.sheet.put("employment type", value);
+                default -> { }
+            }
         }
     }
 
@@ -984,6 +1088,107 @@ public class EorOnboardingFlow {
         contracts.maskSalary();
     }
 
+    // ------------------------------------------------------------------ "Edit Contract" (a wizard of three steps; the happy flow looks at steps 1 and 2 and does not go on to the Letter of Intent)
+
+    /** The boxes of the wizard as {text of the box's label, value}, in page order (text boxes and the drop-down lists). */
+    @SuppressWarnings("unchecked")
+    private List<String[]> wizardValues() {
+        Object o = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                "const own=(x)=>{let r=x.parentElement;for(let i=0;i<7&&r;i++){const t=r.innerText.replace(/\\s+/g,' ').trim();if(t)return t;r=r.parentElement;}return '';};"
+                        + "return Array.from(document.querySelectorAll('main input,main textarea,main button[role=combobox]')).filter(x=>x.type!=='hidden'&&x.type!=='file'&&x.offsetParent!==null)"
+                        + ".map(x=>{const v=x.tagName==='BUTTON'?x.innerText.replace(/\\s+/g,' ').trim():(x.value||'');return [own(x).replace('*','').trim(),v];});");
+        List<String[]> out = new ArrayList<>();
+        if (o instanceof List) {
+            for (Object row : (List<Object>) o) {
+                List<Object> r = (List<Object>) row;
+                out.add(new String[] {String.valueOf(r.get(0)), String.valueOf(r.get(1))});
+            }
+        }
+        return out;
+    }
+
+    /** What a box of the wizard must show (from what the employee has now or from the workbook row); null when the box is not one that is compared (percentages, values that the page calculates). */
+    private String wizardExpected(String label, EorEmployee e) {
+        String l = label.toLowerCase(Locale.ROOT);
+        Map<String, String> s = run.sheet;
+        if (l.startsWith("client name")) return run.client;
+        if (l.startsWith("project name")) return run.project;
+        if (l.startsWith("employee name")) return e.fullName();
+        if (l.startsWith("employee code")) return e.employeeCode.isEmpty() ? null : e.employeeCode;
+        if (l.startsWith("designation")) return e.designation;
+        if (l.startsWith("frequency")) return s.getOrDefault("salary frequency", "Monthly");
+        if (l.startsWith("currency")) return s.getOrDefault("currency", "Rupees");
+        if (l.startsWith("monthly ctc")) return s.get("monthly ctc");
+        if (l.startsWith("annual ctc")) return s.get("annual ctc");
+        if (l.startsWith("monthly gross")) return s.get("gross monthly");
+        if (l.startsWith("pf applicable")) return "y".equalsIgnoreCase(s.getOrDefault("pf(y/n)", "")) ? "Yes" : null;
+        if (l.startsWith("provident fund type")) return s.get("pf");
+        if (l.startsWith("esic applicable")) return "y".equalsIgnoreCase(s.getOrDefault("esic(y/n)", "")) ? "Yes" : null;
+        if (l.contains("% of")) return null; // a percentage is worked out by the page
+        String[][] parts = {{"basic salary", "basic salary"}, {"hra", "hra"}, {"dearness", "da"}, {"special allowance", "special allowance"}, {"conveyance", "conveyance allowance"},
+                {"shift allowance", "shift allowance"}, {"overtime", "overtime"}, {"holiday", "holiday allowance"}, {"medical", "medical alloawance"}, {"other benefits", "other benefits"},
+                {"leave encashment", "leave encashment"}};
+        for (String[] p : parts) {
+            if (l.startsWith(p[0]) && l.contains("×")) {
+                return s.get(p[1]);
+            }
+        }
+        return null;
+    }
+
+    /** Every box of the page of the wizard that is open now: the ones with a known value are compared, all of them are listed in the report. */
+    private void wizardPage(ValueChecks c, String where, EorEmployee e) {
+        List<String[]> values = wizardValues();
+        c.check(where, "The page shows its boxes", !values.isEmpty(), "the boxes of the step", values.size() + " boxes");
+        for (String[] v : values) {
+            String label = v[0].isEmpty() ? "(box without a name)" : v[0];
+            String expected = wizardExpected(v[0], e);
+            if (expected == null || expected.isBlank()) {
+                c.check(where, label, true, "(shown)", v[1].isEmpty() ? "(empty)" : v[1]);
+            } else if (v[0].toLowerCase(Locale.ROOT).startsWith("joining date")) {
+                c.check(where, label, isoDate(expected).equals(isoDate(v[1])), expected, v[1]);
+            } else if (expected.replaceAll("[\\d.,\\s]", "").isEmpty()) {
+                String want = digitsOf(expected).replaceAll("\\.0+$", "");
+                c.check(where, label, want.equals(digitsOf(v[1]).replaceAll("\\.0+$", "")), want, v[1]);
+            } else {
+                c.check(where, label, EorProfileChecks.norm(expected).equals(EorProfileChecks.norm(v[1])), expected, v[1]);
+            }
+        }
+    }
+
+    private static String isoDate(String s) {
+        for (String pattern : new String[] {"dd-MM-yyyy", "dd/MM/yyyy", "yyyy-MM-dd", "dd MMM yyyy", "d MMM yyyy"}) {
+            try {
+                return java.time.LocalDate.parse(s.trim(), java.time.format.DateTimeFormatter.ofPattern(pattern, Locale.ENGLISH)).toString();
+            } catch (RuntimeException notThisFormat) {
+                // the next format
+            }
+        }
+        return s.trim();
+    }
+
+    /**
+     * The contract page is open. "Edit Contract": step 1 (Contract Details) is looked at and a picture is taken, "Save &amp; Continue" opens step 2 (Salary Breakup), which is looked at and
+     * pictured as well. The step 3 (Letter of Intent) is not opened: the happy flow does not send a new letter. The list of contracts is opened afterwards, which leaves the wizard.
+     */
+    public void verifyContractEdit(EorEmployee e, ValueChecks c) throws Exception {
+        contracts.clickEditContract();
+        wizardPage(c, "Edit Contract > step 1 (Contract Details)", e);
+        if (rep != null) {
+            rep.evidence("Edit contract step 1", "\"Edit Contract\", step 1 (Contract Details) of " + e.fullName());
+        }
+        contracts.saveAndContinue();
+        c.guard("Edit Contract > step 2 (Salary Breakup)", "\"Save & Continue\" opens the step Salary Breakup", () -> {
+            contracts.waitForField("Monthly CTC");
+            utils.SmoothScroll.tour(driver);
+            wizardPage(c, "Edit Contract > step 2 (Salary Breakup)", e);
+        });
+        if (rep != null) {
+            rep.evidence("Edit contract step 2", "\"Edit Contract\", step 2 (Salary Breakup) of " + e.fullName());
+        }
+        contracts.open(); // the list of contracts: the wizard is left, the letter of intent step is never started
+    }
+
     // ------------------------------------------------------------------ the employee's own account (login data of the "Welcome Aboard" mail)
 
     /** What the mail "Welcome Aboard" said, per employee e-mail: {password, employee id}. Kept in memory only (never written to the run data file). */
@@ -995,18 +1200,25 @@ public class EorOnboardingFlow {
         String text = mailbox.readMail("Welcome Aboard", ConfigManager.getInt("email.poll.timeout.seconds", 120));
         String who = e.originalName.isEmpty() ? e.fullName() : e.originalName;
         Assert.assertTrue(text.contains(who), "The mail \"Welcome Aboard\" is not for " + who + ". It says: \"" + (text.length() > 200 ? text.substring(0, 200) + "..." : text) + "\"");
-        java.util.regex.Matcher pw = java.util.regex.Pattern.compile("(?i)Temporary Password\\s+(\\S+)").matcher(text);
+        java.util.regex.Matcher pw = java.util.regex.Pattern.compile("(?i)Temporary Password\\s*:?\\s*(\\S+)").matcher(text);
         Assert.assertTrue(pw.find(), "The mail \"Welcome Aboard\" does not contain a temporary password. It says: \"" + (text.length() > 200 ? text.substring(0, 200) + "..." : text) + "\"");
         String password = pw.group(1);
         SecretMasker.register(password);
-        java.util.regex.Matcher id = java.util.regex.Pattern.compile("Employee ID\\s+(EMP_[0-9]+)").matcher(text);
+        java.util.regex.Matcher id = java.util.regex.Pattern.compile("Employee ID\\s*:?\\s*(EMP_[0-9]+)").matcher(text);
         String employeeId = id.find() ? id.group(1) : "";
-        java.util.regex.Matcher mail = java.util.regex.Pattern.compile("Email\\s+(\\S+@\\S+)").matcher(text);
+        java.util.regex.Matcher mail = java.util.regex.Pattern.compile("Email\\s*:?\\s*(\\S+@\\S+)").matcher(text);
         String loginMail = mail.find() ? mail.group(1) : "";
         Assert.assertTrue(loginMail.equalsIgnoreCase(e.email), "The mail \"Welcome Aboard\" gives the login e-mail \"" + loginMail + "\" but the employee was registered with \"" + e.email + "\".");
-        welcome.put(e.email, new String[] {password, employeeId});
+        String link = ""; // the button "Login to Your Account" of the mail
+        for (String l : mailbox.links()) {
+            if (l.toLowerCase(Locale.ROOT).contains("login") && l.contains("->")) {
+                link = l.substring(l.indexOf("->") + 2).trim();
+            }
+        }
+        welcome.put(e.email, new String[] {password, employeeId, link});
         mailbox.close();
-        return "The mail \"Welcome Aboard\" arrived for " + who + ". It gives the login e-mail " + loginMail + ", the employee id " + employeeId + " and the temporary password " + password + ".";
+        return "The mail \"Welcome Aboard\" arrived for " + who + ". It gives the login e-mail " + loginMail + ", the employee id " + employeeId + ", the temporary password " + password
+                + " and the link " + (link.isEmpty() ? "(none: the normal login page is used)" : link) + ".";
     }
 
     /** Opens the login page and signs in with the e-mail and the temporary password of the mail; the employee's own account (/employee) must open. */
@@ -1014,7 +1226,8 @@ public class EorOnboardingFlow {
         String[] w = welcome.get(e.email);
         Assert.assertNotNull(w, "The mail \"Welcome Aboard\" of " + e.fullName() + " was not read, so there is no password to sign in with.");
         return withRestart(() -> {
-            login.freshLogin(ConfigManager.baseUrl());
+            // the address of the mail is opened in the browser (the same tab that was used for the administrator), then the e-mail and the password of the mail are typed
+            login.freshLogin(w.length > 2 && !w[2].isEmpty() ? w[2].replaceAll("/+$", "") : ConfigManager.baseUrl());
             login.login(e.email, w[0]);
             try {
                 new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofSeconds(40)).until(d -> d.getCurrentUrl().contains("/employee"));

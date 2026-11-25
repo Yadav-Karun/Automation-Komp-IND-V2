@@ -138,6 +138,9 @@ public class EorHappyFlowSteps {
         run.workbook = file.getFileName().toString();
 
         List<Map<String, String>> rows = utils.EorWorkbooks.readRows(file);
+        for (int i = 0; i < rows.size() && i < run.employees.size(); i++) {
+            run.employees.get(i).sheet = new java.util.LinkedHashMap<>(rows.get(i)); // the salary and the other values of the row: the edit case compares the contract with them
+        }
         checks.check("Workbook", "Number of employees (row 2 and row 3)", rows.size() == 2, "2", String.valueOf(rows.size()));
         for (int i = 0; i < rows.size(); i++) {
             EorEmployee e = run.employees.get(i);
@@ -419,7 +422,23 @@ public class EorHappyFlowSteps {
         candidates.selectRow(e.email);
         picture("Employee ticked", "The box of " + e.fullName() + " is ticked and \"Mark as Joined\" is enabled");
         candidates.markAsJoined();
+        e.joined = true;
         return e.fullName() + " was marked as joined.";
+    }
+
+    private static final Object SAVE_LOCK = new Object();
+
+    // the data of the run (without the password) is kept in the run folder: -Deor.hf.run.data=<this file> runs the edit case on these employees later without a new onboarding
+    public void saveRunData() {
+        synchronized (SAVE_LOCK) {
+            try {
+                java.nio.file.Files.createDirectories(ExecutionInfo.root());
+                new com.fasterxml.jackson.databind.ObjectMapper().enable(com.fasterxml.jackson.databind.SerializationFeature.INDENT_OUTPUT)
+                        .writeValue(ExecutionInfo.root().resolve("eor-run-data.json").toFile(), run);
+            } catch (java.io.IOException ex) {
+                utils.Log.warn("The run data could not be saved: " + ex.getMessage());
+            }
+        }
     }
 
     public void notACandidateAnyMore(EorEmployee e, ValueChecks c) {

@@ -113,6 +113,9 @@ public class EorEmployee {
     public String joiningDate = "";
     public String candidateId = "";
 
+    /** The workbook row of this employee (header in lower case -> value): the salary, the department, the manager ... (the happy flow keeps one row per employee). */
+    public java.util.Map<String, String> sheet = new java.util.LinkedHashMap<>();
+
     /** The name as it was when the "Welcome Aboard" mail was sent (before the profile was edited); empty until the profile is edited. */
     public String originalName = "";
 
