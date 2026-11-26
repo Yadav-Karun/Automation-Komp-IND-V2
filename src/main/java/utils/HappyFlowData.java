@@ -175,16 +175,18 @@ public class HappyFlowData {
      * A NEW valid value for a text field of the profile, chosen by its label (a person's name for a name, an address for an address ...), or null when the label is not known
      * (the caller then changes the old value a little). Numbers are not handled here: they are counted up by the caller.
      */
-    public static String different(String label, String old) {
+    public static String different(String label, String old, boolean female) {
         String l = label.toLowerCase(Locale.ROOT).trim();
         String o = old == null ? "" : old.trim();
         for (int attempt = 0; attempt < 6; attempt++) {
             String v = switch (l) {
-                case "first name", "middle name" -> pick(random.nextBoolean() ? MALE : FEMALE);
+                case "first name", "middle name" -> pick(female ? FEMALE : MALE);
                 case "last name" -> faker.name().lastName().replaceAll("[^a-zA-Z]", "");
-                case "father name", "spouse name" -> pick(MALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "father name" -> pick(MALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "spouse name" -> pick(female ? MALE : FEMALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
                 case "mother name" -> pick(FEMALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
-                case "name", "account holder name" -> pick(random.nextBoolean() ? MALE : FEMALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "account holder name" -> pick(female ? FEMALE : MALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
+                case "name" -> pick(random.nextBoolean() ? MALE : FEMALE) + " " + faker.name().lastName().replaceAll("[^a-zA-Z]", "");
                 case "address", "bank address" -> faker.address().streetAddress().replaceAll("[^a-zA-Z0-9 ,]", "");
                 case "branch name" -> pick(new String[] {"Main", "City", "Central", "Market"}) + " Branch";
                 case "bank name" -> pick(BANKS);

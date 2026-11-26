@@ -153,6 +153,14 @@ public class EorOnboardingFlow {
         return withRestart(this::signInAdminOnce);
     }
 
+    /** A window that is still signed in as the administrator (the happy flow goes on in the window of the journey) is used as it is; otherwise the administrator signs in. */
+    public String signInAdminIfNeeded() throws Exception {
+        if (!driver.findElements(org.openqa.selenium.By.id("password")).isEmpty() || !employees.sidebarVisible()) {
+            return signInAdmin();
+        }
+        return "This window is still signed in as the EOR administrator: the menu with \"Employees\" is shown, no new sign-in is needed.";
+    }
+
     private String signInAdminOnce() {
         login.freshLogin(ConfigManager.baseUrl());
         login.login(ConfigManager.eorEmail(), ConfigManager.eorPassword());
@@ -392,6 +400,14 @@ public class EorOnboardingFlow {
         openProfileFromList(e);
     }
 
+    /** MSA &amp; Contract > Contract: the contract of the employee is searched and opened (the page of the contract, as after a click on the row). */
+    public void openContractOf(EorEmployee e) {
+        contracts.open();
+        List<Map<String, String>> rows = contracts.search(e.email);
+        Assert.assertFalse(rows.isEmpty(), "The list of contracts does not show " + e.email + " after the search.");
+        contracts.openFirstRow();
+    }
+
     /** Employees > EOR: the e-mail is searched and the list shows the row of the employee. */
     public String searchEmployee(EorEmployee e) {
         employees.open();
@@ -420,9 +436,11 @@ public class EorOnboardingFlow {
         List<Map<String, String>> rows = employees.search(e.email);
         // the list may show the changes a little later than the profile: it is loaded again for at most verifySeconds seconds (same rule as the profile), then what it shows is judged
         long end = System.currentTimeMillis() + verifySeconds * 1000L;
+        int reloads = 0;
         while (System.currentTimeMillis() < end && !(rows.size() == 1 && listShowsChanges(e, rows.get(0)))) {
+            reloads++;
             try {
-                Thread.sleep(5000); // documented: the list is filled from the profile a moment later
+                Thread.sleep((refreshEvery > 0 ? refreshEvery : 5) * 1000L); // documented: the list is filled from the profile a moment later
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
             }
@@ -431,6 +449,11 @@ public class EorOnboardingFlow {
             rows = employees.search(e.email);
         }
         String w = "Employees > EOR list";
+        if (reloads > 0) {
+            boolean nowShown = rows.size() == 1 && listShowsChanges(e, rows.get(0));
+            c.check(w, "The list shows the changes at the first look", false, "the changed name, designation and manager without reloading the list",
+                    "the old values were shown at first; " + (nowShown ? "the changes appeared after " + reloads + " refresh(es)" : "they were still old after " + reloads + " refreshes"));
+        }
         c.check(w, "The employee is found by the e-mail", rows.size() == 1, "one row", rows.size() + " row(s)");
         if (rows.isEmpty()) {
             return;
@@ -542,6 +565,10 @@ public class EorOnboardingFlow {
                 }
                 profile.unmaskAll();
                 c.check(w, "\"Unmask all\" turns the button into \"Mask all\"", profile.unmasked(), "the button \"Mask all\"", profile.unmasked() ? "shown" : "not shown");
+                // the page may hide the values again (or not show them yet) right after "Unmask all": "Mask all" and "Unmask all" are used again, at most 3 times, before the values are read
+                for (int again = 0; again < 3 && profile.stillMasked(); again++) {
+                    profile.unmaskAgainIfNeeded();
+                }
                 java.util.Map<String, String> shown = readMasked(tab);
                 for (java.util.Map.Entry<String, String> en : hiddenNow.entrySet()) {
                     String full = shown.get(en.getKey());
@@ -734,7 +761,7 @@ public class EorOnboardingFlow {
                     }
                     default -> {
                         String value = key.startsWith("confirm") && accountNo != null ? accountNo
-                                : key.equals("language known") ? (f.value.trim().equalsIgnoreCase("English") ? "Hindi" : "English") : newText(f.value, f.label);
+                                : key.equals("language known") ? (f.value.trim().equalsIgnoreCase("English") ? "Hindi" : "English") : newText(e, f.value, f.label);
                         profile.setText(f.label, value);
                         shown = profile.currentValue(f.label);
                         if (key.equals("account no")) {
@@ -753,13 +780,28 @@ public class EorOnboardingFlow {
         for (String[] kept : toRemember) {
             remember(e, tab, block, kept[0], kept[1]); // only a block that the application saved changes what the later steps compare with
         }
-        List<String[]> after = settled(expected);
+        List<String[]> after;
         boolean reloaded = false;
-        if (!allShown(after, expected)) {
-            // the page still shows an old value after the change was submitted: it is loaded again and read once more (what a user would do)
-            profile.reload(tab);
-            after = profile.pairs();
-            reloaded = true;
+        if (refreshEvery > 0) {
+            // the page is reloaded every refreshEvery seconds while an old value is still shown, at most verifySeconds / refreshEvery times; then what it shows is judged
+            after = settledByRefresh(expected, tab);
+            if (refreshesUsed > 0 && allShown(after, expected)) {
+                // the first look after "Submit" showed old values: that is a problem of the application (soft check: the case goes on)
+                c.check(where, "The page shows the new values right after \"Submit\"", false, "the new values are shown without reloading the page",
+                        "the old values were shown at first; the new ones appeared after " + refreshesUsed + " refresh(es)");
+            }
+            if (!allShown(after, expected)) {
+                c.check(where, "The page shows the new values after \"Submit\" (reloaded " + refreshesUsed + " times)", false, "the new values are shown within " + verifySeconds + " seconds",
+                        "the old values were still shown after " + refreshesUsed + " refreshes");
+            }
+        } else {
+            after = settled(expected);
+            if (!allShown(after, expected)) {
+                // the page still shows an old value after the change was submitted: it is loaded again and read once more (what a user would do)
+                profile.reload(tab);
+                after = profile.pairs();
+                reloaded = true;
+            }
         }
         for (java.util.Map.Entry<EorProfilePage.Field, String> en : expected.entrySet()) {
             EorProfilePage.Field f = en.getKey();
@@ -781,14 +823,47 @@ public class EorOnboardingFlow {
     }
 
     /** A new value for a text box: of its own kind (a name for a name) when the flow was asked for that, else the old value counted up / with a suffix. */
-    private String newText(String old, String label) {
+    private String newText(EorEmployee e, String old, String label) {
         if (fieldAwareEdits && !(old != null && old.trim().matches("[0-9]+"))) {
-            String v = utils.HappyFlowData.different(label, old);
+            String v = utils.HappyFlowData.different(label, old, "Female".equalsIgnoreCase(e.gender));
             if (v != null) {
                 return v;
             }
         }
         return mutate(old, label);
+    }
+
+    /** Reload the profile every this many seconds while an edited value is still old (0 = the old behaviour: wait, then one reload that counts as a finding). */
+    private int refreshEvery;
+    private int refreshesUsed;
+
+    public void setRefreshEvery(int seconds) {
+        this.refreshEvery = seconds;
+    }
+
+    /** Waits for the new values; every {@code refreshEvery} seconds without them the page is loaded again (6 times in 60 seconds). */
+    private List<String[]> settledByRefresh(java.util.Map<EorProfilePage.Field, String> expected, String tab) {
+        refreshesUsed = 0;
+        long start = System.currentTimeMillis();
+        List<String[]> pairs = profile.pairs();
+        for (int step = 1; !allShown(pairs, expected) && step <= Math.max(1, verifySeconds / refreshEvery); step++) {
+            long until = start + (long) step * refreshEvery * 1000L;
+            while (!allShown(pairs, expected) && System.currentTimeMillis() < until) {
+                try {
+                    Thread.sleep(1000); // documented: the profile refreshes a moment after Submit
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+                profile.unmaskAgainIfNeeded();
+                pairs = profile.pairs();
+            }
+            if (!allShown(pairs, expected)) {
+                profile.reload(tab);
+                refreshesUsed++;
+                pairs = profile.pairs();
+            }
+        }
+        return pairs;
     }
 
     /** The values of the page, read again until every changed value shows its new content (at most {@code verifySeconds} seconds; it stops as soon as they are all shown). */
@@ -1021,6 +1096,25 @@ public class EorOnboardingFlow {
     public void verifyContract(EorEmployee e, ValueChecks c) throws Exception {
         contracts.open();
         List<Map<String, String>> rows = contracts.search(e.email);
+        // happy flow: the list may show the changed name a little later than the profile: it is loaded again every refreshEvery seconds, at most verifySeconds seconds, then what it shows is judged
+        long wait = System.currentTimeMillis() + verifySeconds * 1000L;
+        int reloads = 0;
+        while (refreshEvery > 0 && System.currentTimeMillis() < wait && !(rows.size() == 1 && EorProfileChecks.norm(TableReader.column(rows.get(0), "EMPLOYEE NAME")).equals(EorProfileChecks.norm(e.fullName())))) {
+            try {
+                Thread.sleep(refreshEvery * 1000L); // documented: the list is filled from the profile a moment later
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            driver.navigate().refresh();
+            contracts.open();
+            rows = contracts.search(e.email);
+            reloads++;
+        }
+        if (reloads > 0) {
+            boolean nowShown = rows.size() == 1 && EorProfileChecks.norm(TableReader.column(rows.get(0), "EMPLOYEE NAME")).equals(EorProfileChecks.norm(e.fullName()));
+            c.check("Contract list", "The list shows the changed name at the first look", false, "the changed name \"" + e.fullName() + "\" without reloading the list",
+                    "the old name was shown at first; " + (nowShown ? "the changed name appeared after " + reloads + " refresh(es)" : "it was still the old name after " + reloads + " refreshes"));
+        }
         c.check("Contract list", "The employee is found by the e-mail", rows.size() == 1, "one row", rows.size() + " rows");
         if (rows.isEmpty()) {
             return;
@@ -1241,7 +1335,20 @@ public class EorOnboardingFlow {
 
     /** The employee's account page: the welcome line, the header and every tab (after "Unmask all") compared with what the administrator's profile shows after the changes. */
     public void verifyEmployeeAccount(EorEmployee e, ValueChecks c) throws Exception {
-        String page = (String) ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("return document.body.innerText;"); // the welcome line is above the main part of the page
+        // the account page is loaded in parts (the welcome line first, the header with the employee code later): the text is read only after the employee code is on the page (at most 40 seconds)
+        long loaded = System.currentTimeMillis() + 40000;
+        String page = "";
+        do {
+            page = (String) ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("return document.body.innerText;"); // the welcome line is above the main part of the page
+            if (page.matches("(?s).*EMP_[0-9]+.*")) {
+                break;
+            }
+            try {
+                Thread.sleep(1000); // documented: the page is filled a moment after it opens
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        } while (System.currentTimeMillis() < loaded);
         String acc = "Employee account";
         String lowerPage = page.toLowerCase(Locale.ROOT);
         c.check(acc, "The page welcomes the employee by name", lowerPage.contains(("Welcome, " + e.fullName()).toLowerCase(Locale.ROOT)), "Welcome, " + e.fullName(),

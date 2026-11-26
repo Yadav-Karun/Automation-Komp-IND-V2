@@ -26,9 +26,9 @@ import utils.SecretMasker;
  *   TC-EOR-HF-00  login, Employees > EOR > Bulk Upload with ONE workbook of two employees (row 2: Experienced + Male, row 3: Fresher + Female)
  *   TC-EOR-HF-01  the experienced man: from "Candidates: pending" to Active
  *   TC-EOR-HF-02  the fresher woman: the same journey (runs IN PARALLEL with TC-EOR-HF-01, each in its own browser)
- *   TC-EOR-HF-03  edit flow of employee 1 or 2 (random, 50% each): search in Employees > EOR, check every tab, edit every value of every tab, check the listing and the contract,
- *                 "Edit Contract", then the employee signs in with the mail "Welcome Aboard" and every tab is checked again
- *   Run only the edit case on the employees of an earlier run: -Deor.hf.run.data=<reports/EorOnboardingHappyFlow/<run>/eor-run-data.json> (TC-EOR-HF-00..02 are then written as "not run")
+ *   TC-EOR-HF-03 / 04  the edit flow of employee 1 / employee 2, BOTH, at the same time, each in the window of its own journey (the administrator is still signed in there): search in Employees > EOR,
+ *                 check every tab, edit every value of every tab, check the list and the contract, "Edit Contract", then the employee signs in with the mail "Welcome Aboard" and every tab is checked again
+ *   Run only the edit case on the employees of an earlier run: -Deor.hf.run.data=<reports/EorOnboardingHappyFlow/<run>/eor-run-data.json> (TC-EOR-HF-00..02 are then written as "not run" and each edit case opens a window of its own)
  *
  * Data is fake and new on every run (HappyFlowData). Mails come from the QA Gmail mailbox (IMAP); the +N numbers used are in testdata/eor-used-emails.txt.
  * Environment: -Denv=sandbox (default) | preprod | production. Run: mvn clean test -Dsuite=testng-eor-happy-flow.xml
@@ -42,6 +42,8 @@ public class EorOnboardingHappyFlow extends BaseTest {
     /** The two employees of the upload (set by TC-EOR-HF-00, read by the two parallel cases). */
     private volatile EorRun run;
     private volatile boolean earlierRun;
+    /** The window of each journey (employee index -> browser): the edit flow of that employee goes on in the same window. */
+    private final java.util.Map<Integer, WebDriver> journeyBrowsers = new java.util.concurrent.ConcurrentHashMap<>();
     private EorHappyFlowSteps admin;
     private final List<WebDriver> candidateBrowsers = Collections.synchronizedList(new java.util.ArrayList<>());
 
@@ -88,81 +90,167 @@ public class EorOnboardingHappyFlow extends BaseTest {
         journey(1, "TC-EOR-HF-02", "EOR happy flow, fresher woman: from the letter of intent to an Active employee");
     }
 
-    // TC-EOR-HF-03 - the edit flow of employee 1 or 2 (random, 50% each), on the browser of the administrator:
-    // search in Employees > EOR > View > every tab checked > every value of every tab edited (each block checked within 60 seconds) > the list > the contract > Edit Contract >
+    // TC-EOR-HF-03 - the edit flow of employee 1 (experienced man). It goes on in the window of his journey (already signed in as the EOR administrator) as soon as that journey is finished,
+    // at the same time as the edit flow of employee 2 in her own window.
+    @Test(priority = 3, dependsOnMethods = "tc01_experiencedMale", alwaysRun = true)
+    public void tc03_editEmployee1() throws Exception {
+        editFlow(0, "TC-EOR-HF-03");
+    }
+
+    // TC-EOR-HF-04 - the same edit flow for employee 2 (fresher woman), in her window.
+    @Test(priority = 3, dependsOnMethods = "tc02_fresherFemale", alwaysRun = true)
+    public void tc04_editEmployee2() throws Exception {
+        editFlow(1, "TC-EOR-HF-04");
+    }
+
+    // The edit flow of one employee, in the browser window of that employee's journey (a new window only when the edit case is run alone on an earlier run):
+    // Employees > EOR > search > View > every tab checked > every value of every tab edited (each block checked within 60 seconds) > the list > the contract > Edit Contract >
     // the mail "Welcome Aboard" > the employee signs in > every tab checked again with the changed values.
-    @Test(priority = 3, dependsOnMethods = {"tc01_experiencedMale", "tc02_fresherFemale"}, alwaysRun = true)
-    public void tc03_editFlow() throws Exception {
-        String title = "EOR happy flow: edit one employee, check the profile, the list and the contract, then the employee's own account";
-        EorEmployee e = chooseEmployee();
-        if (e == null) {
-            notRun("TC-EOR-HF-03", G_EDIT, title, run == null ? "the upload did not happen, so there is no employee to edit" : "neither employee of this run reached the status Active");
+    private void editFlow(int index, String id) throws Exception {
+        String title = "EOR happy flow, " + (index == 0 ? "experienced man" : "fresher woman") + ": edit the employee, check the profile, the list and the contract, then the employee's own account";
+        EorEmployee e = run == null || run.employees.size() <= index ? null : run.employees.get(index);
+        if (e == null || !e.joined) {
+            notRun(id, G_EDIT, title, e == null ? "the upload did not happen, so there is no employee to edit" : "the employee " + e.fullName() + " did not reach the status Active");
             return;
         }
-        int number = run.employees.indexOf(e) + 1;
-        closeCandidateBrowsers(); // the two candidate windows are finished; the administrator's window was behind them and the page was not drawn (the login form stayed invisible)
-        driver.switchTo().window(driver.getWindowHandle());
-        driver.manage().window().maximize();
-        try {
-            ((org.openqa.selenium.chromium.ChromiumDriver) driver).executeCdpCommand("Page.bringToFront", java.util.Map.of());
-        } catch (RuntimeException ignored) {
-            // the window is in front anyway
+        WebDriver d = journeyBrowsers.get(index); // the window of the journey: the administrator is still signed in there
+        if (d == null) {
+            d = DriverFactory.create(true); // the edit case is run alone on an earlier run: a window of its own
+            candidateBrowsers.add(d);
         }
-        EorOnboardingFlow edit = new EorOnboardingFlow(driver); // the pages of the old flow (profile, contract) already know the edit blocks
-        edit.useRun(run);
+        String n = id.toLowerCase().replace("tc-eor-", "").replace("-", "_"); // hf_03 / hf_04: picture and step names are unique per case
+        EorOnboardingFlow edit = new EorOnboardingFlow(d); // the pages of the old flow (profile, contract) already know the edit blocks
+        EorRun mine = new EorRun(); // its own copy: the two edit flows run at the same time and each has its own workbook row
+        mine.runId = run.runId;
+        mine.runDate = run.runDate;
+        mine.client = run.client;
+        mine.project = run.project;
+        mine.employees = run.employees;
+        mine.sheet = e.sheet;
+        edit.useRun(mine);
         edit.useImapMailbox();
         edit.setVerifySeconds(60);
+        edit.setRefreshEvery(10); // an old value after Submit: the page is reloaded after 10 seconds, again every 10 seconds, 6 times in 60 seconds, then the case fails
         edit.setFieldAwareEdits(true);
-        run.sheet = e.sheet; // the salary and the other values of the workbook row of THIS employee
-        TestReporter rep = TestReporter.start("TC-EOR-HF-03", G_EDIT, title,
-                "Positive test: the administrator opens the profile of employee " + number + " (" + e.fullName() + ", chosen at random), checks every tab, edits every value, then checks the list, the contract and the employee's own account",
-                "The employee " + number + " of the upload: " + e.experience + ", " + e.gender + ", " + e.email,
-                "Every changed value is shown in the profile within 60 seconds, in the list, in the contract and in the employee's own account", driver, holder(e.fullName()),
-                () -> "EOR happy flow | edit flow of employee " + number + " | " + e.fullName() + " | " + SecretMasker.maskEmail(e.email) + " | environment " + ConfigManager.env());
+        TestReporter rep = TestReporter.start(id, G_EDIT, title,
+                "Positive test: the administrator opens the profile of " + e.fullName() + " (" + e.experience + ", " + e.gender + ") in the window of the journey, checks every tab, edits every value, then checks the list, the contract and the employee's own account",
+                "The employee " + (index + 1) + " of the upload: " + e.experience + ", " + e.gender + ", " + e.email,
+                "Every changed value is shown in the profile within 60 seconds, in the list, in the contract and in the employee's own account", d, holder(e.fullName()),
+                () -> "EOR happy flow | edit flow | " + e.experience + " + " + e.gender + " | " + e.fullName() + " | " + SecretMasker.maskEmail(e.email) + " | environment " + ConfigManager.env());
         edit.setReporter(rep);
+        // when a window stops answering in the middle of a step it is replaced by a new one: the administrator signs in again, the page of that step is opened again and the step is run again
+        Guard g = new Guard(d, edit, rep);
+        Restore adminMenu = edit::signInAdmin;
+        Restore adminSearch = () -> {
+            edit.signInAdmin();
+            edit.searchEmployee(e);
+        };
+        Restore adminProfile = () -> {
+            adminSearch.run();
+            edit.openProfileFromList(e);
+        };
+        Restore contractPage = () -> {
+            edit.signInAdmin();
+            edit.openContractOf(e);
+        };
+        Restore employeeAccount = () -> edit.signInEmployee(e);
 
-        rep.phase("hf03_sign_in", "Sign in as the EOR administrator", "The login succeeds", edit::signInAdmin);
-        rep.phase("hf03_search", "Employees > EOR: search the employee", "The list shows the row of the employee", () -> edit.searchEmployee(e));
-        rep.phase("hf03_open_profile", "Action > View: open the profile", "The profile of the employee opens", () -> edit.openProfileFromList(e));
-        rep.phaseChecks("hf03_check_tabs", "Every tab (Personal & Contact, Professional, Statutory Details, Documents, Employment Documents): \"Unmask all\", then compare with what was entered",
+        g.phase(adminMenu, n + "_sign_in", "Administrator: the window of the journey is still signed in as the EOR administrator (a new sign-in only when it is not)", "The menu with Employees is shown", edit::signInAdminIfNeeded);
+        g.phase(adminMenu, n + "_search", "Employees > EOR: search the employee", "The list shows the row of the employee", () -> edit.searchEmployee(e));
+        g.phase(adminSearch, n + "_open_profile", "Action > View: open the profile", "The profile of the employee opens", () -> edit.openProfileFromList(e));
+        g.checks(adminProfile, n + "_check_tabs", "Every tab (Personal & Contact, Professional, Statutory Details, Documents, Employment Documents): \"Unmask all\", then compare with what was entered",
                 "Every tab shows what was entered; a full-page picture of every tab", c -> edit.verifyOpenProfile(e, c));
 
         String[] tabs = {"Personal & Contact", "Professional", "Statutory Details", "Documents"}; // Employment Documents has no Edit button
         for (int t = 0; t < tabs.length; t++) {
             String tab = tabs[t];
-            rep.phaseChecks("hf03_edit_" + (t + 1), "Edit every value of \"" + tab + "\" (a name for a name, a number for a number) and submit each block",
-                    "Every block is saved and the tab shows the new values within 60 seconds", c -> edit.editTab(e, tab, c));
+            g.checks(adminProfile, n + "_edit_" + (t + 1), "Edit every value of \"" + tab + "\" (a name for a name, a number for a number) and submit each block",
+                    "Every block is saved and the tab shows the new values (the page is reloaded every 10 seconds, 6 times at most, when the old values stay)", c -> edit.editTab(e, tab, c));
         }
 
-        rep.phaseChecks("hf03_list", "Employees > EOR: search the employee and compare the row of the list", "The row shows the changed name and designation, the code, client, project, manager and the status Active",
+        g.checks(adminMenu, n + "_list", "Employees > EOR: search the employee and compare the row of the list", "The row shows the changed name and designation, the code, client, project, manager and the status Active",
                 c -> edit.verifyEmployeeListing(e, c));
-        rep.phaseChecks("hf03_contract", "MSA & Contract > Contract: search the employee, open the contract, unmask the salary breakup and compare it with the workbook",
+        g.checks(adminMenu, n + "_contract", "MSA & Contract > Contract: search the employee, open the contract, unmask the salary breakup and compare it with the workbook",
                 "The list and the contract show the changed values; the salary breakup equals the workbook row", c -> edit.verifyContract(e, c));
-        rep.phaseChecks("hf03_edit_contract", "Edit Contract: look at step 1, \"Save & Continue\", look at step 2 (Salary Breakup)", "Every visible detail of both steps is correct",
+        g.checks(contractPage, n + "_edit_contract", "Edit Contract: look at step 1, \"Save & Continue\", look at step 2 (Salary Breakup)", "Every visible detail of both steps is correct",
                 c -> edit.verifyContractEdit(e, c));
-        rep.phase("hf03_sign_out", "Log out of the EOR console", "The login page is shown", edit::signOutAdmin);
+        g.phase(null, n + "_sign_out", "Log out of the EOR console", "The login page is shown", edit::signOutAdmin);
 
-        rep.phase("hf03_welcome_mail", "Mail \"Welcome Aboard - Your Employee Login Details\": the login link, the e-mail and the password", "The mail is for this employee and gives the login data",
+        g.phase(null, n + "_welcome_mail", "Mail \"Welcome Aboard - Your Employee Login Details\": the login link, the e-mail and the password", "The mail is for this employee and gives the login data",
                 () -> edit.readWelcomeMail(e));
-        rep.phase("hf03_employee_sign_in", "The login link of the mail is opened in the first tab, the e-mail and the password are typed, Sign in", "The employee's own account opens",
+        g.phase(null, n + "_employee_sign_in", "The login link of the mail is opened in the same window, the e-mail and the password are typed, Sign in", "The employee's own account opens",
                 () -> edit.signInEmployee(e));
-        rep.phaseChecks("hf03_employee_check", "The employee's account, every tab (\"Unmask all\" first): compare with the changed values",
+        g.checks(employeeAccount, n + "_employee_check", "The employee's account, every tab (\"Unmask all\" first): compare with the changed values",
                 "Personal & Contact, Professional, Statutory Details, Documents and Employment Documents show the changed values", c -> edit.verifyEmployeeAccount(e, c));
-        rep.phase("hf03_employee_sign_out", "Log out of the employee's account", "The login page is shown", edit::signOutEmployee);
+        g.phase(null, n + "_employee_sign_out", "Log out of the employee's account", "The login page is shown", edit::signOutEmployee);
         assertNoDefects(rep);
     }
 
-    // 50% employee 1, 50% employee 2; when the chosen one did not join, the other one is used
-    private EorEmployee chooseEmployee() {
-        if (run == null || run.employees.size() < 2) {
-            return null;
+    /** A step of the edit case that needs the page of an earlier step again when the window has to be replaced. */
+    private interface Restore {
+        void run() throws Exception;
+    }
+
+    private final java.util.concurrent.atomic.AtomicBoolean killedOnPurpose = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Runs the steps of one edit case; when the window of the case stops answering the step is repeated in a new window (see {@link #guarded}). */
+    private final class Guard {
+        private WebDriver window;
+        private final EorOnboardingFlow edit;
+        private final TestReporter rep;
+
+        Guard(WebDriver window, EorOnboardingFlow edit, TestReporter rep) {
+            this.window = window;
+            this.edit = edit;
+            this.rep = rep;
         }
-        int first = new Random().nextBoolean() ? 0 : 1;
-        EorEmployee e = run.employees.get(first);
-        if (!e.joined) {
-            e = run.employees.get(1 - first);
+
+        void phase(Restore restore, String slug, String title, String expected, TestReporter.PhaseAction action) {
+            guarded(restore, slug, () -> rep.phase(slug, title, expected, action));
         }
-        return e.joined ? e : null;
+
+        void checks(Restore restore, String slug, String title, String expected, TestReporter.CheckAction action) {
+            guarded(restore, slug, () -> rep.phaseChecks(slug, title, expected, action));
+        }
+
+        // -Deor.hf.kill.before=<step name, e.g. edit_contract>: the window is closed on purpose before that step (once), to test the recovery
+        private void guarded(Restore restore, String slug, Runnable step) {
+            String hook = ConfigManager.get("eor.hf.kill.before");
+            if (hook != null && slug.endsWith("_" + hook) && killedOnPurpose.compareAndSet(false, true)) {
+                DriverFactory.quit(window);
+            }
+            try {
+                step.run();
+            } catch (AssertionError | RuntimeException failed) {
+                if (restore == null || !windowLost(failed)) {
+                    throw failed;
+                }
+                utils.Log.warn("The window of the edit case stopped answering (" + failed.getClass().getSimpleName() + "): a new window is opened and the step \"" + slug + "\" is repeated.");
+                WebDriver fresh = DriverFactory.create(true);
+                candidateBrowsers.add(fresh);
+                window = fresh;
+                edit.useDriver(fresh); // the pages and the report go on with the new window
+                try {
+                    restore.run();
+                } catch (Exception ex) {
+                    throw new AssertionError("The new window could not be prepared for the step \"" + slug + "\": " + ex.getMessage(), ex);
+                }
+                rep.note("The browser window stopped answering during the previous attempt of this step. It was replaced by a new window, the administrator signed in again and the step was run again.");
+                step.run();
+            }
+        }
+    }
+
+    // a window that is closed, crashed or frozen: the session is gone ("invalid session id") or the browser never answers
+    private static boolean windowLost(Throwable t) {
+        for (Throwable x = t; x != null; x = x.getCause()) {
+            String message = String.valueOf(x.getMessage()).toLowerCase();
+            if (x instanceof org.openqa.selenium.NoSuchSessionException || message.contains("invalid session id") || message.contains("session deleted")
+                    || message.contains("read timed out") || message.contains("chrome not reachable") || message.contains("disconnected: not connected to devtools")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // -Deor.hf.run.data=<eor-run-data.json of an earlier run>: its employees are Active; nothing is uploaded and no journey is run
@@ -199,6 +287,7 @@ public class EorOnboardingHappyFlow extends BaseTest {
         EorEmployee e = run.employees.get(index);
         WebDriver d = DriverFactory.create(true); // its own browser, its own temporary profile
         candidateBrowsers.add(d);
+        journeyBrowsers.put(index, d);
         EorHappyFlowSteps s = new EorHappyFlowSteps(d);
         s.useRun(run);
         String n = id.toLowerCase().replace("tc-eor-", "").replace("-", "_"); // hf_01: picture and step names are unique per case (both cases write into one folder)
